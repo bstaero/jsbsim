@@ -67,7 +67,7 @@ FGPiston::FGPiston(FGFDMExec* exec, Element* el, int engine_number, struct Input
   Load(exec, el);
 
   Element *table_element;
-  FGPropertyManager* PropertyManager = exec->GetPropertyManager();
+  auto PropertyManager = exec->GetPropertyManager();
 
   // Defaults and initializations
 
@@ -124,7 +124,7 @@ FGPiston::FGPiston(FGFDMExec* exec, Element* el, int engine_number, struct Input
   bTakeoffBoost = false;
   TakeoffBoost = 0.0;   // Default to no extra takeoff-boost
   BoostLossFactor = 0.0;   // Default to free boost
-  
+
   int i;
   for (i=0; i<FG_MAX_BOOST_SPEEDS; i++) {
     RatedBoost[i] = 0.0;
@@ -142,7 +142,7 @@ FGPiston::FGPiston(FGFDMExec* exec, Element* el, int engine_number, struct Input
 
   // Read inputs from engine data file where present.
 
-  if (el->FindElement("minmp")) 
+  if (el->FindElement("minmp"))
     MinManifoldPressure_inHg = el->FindElementValueAsNumberConvertTo("minmp","INHG");
   if (el->FindElement("maxmp"))
     MaxManifoldPressure_inHg = el->FindElementValueAsNumberConvertTo("maxmp","INHG");
@@ -309,7 +309,7 @@ FGPiston::FGPiston(FGFDMExec* exec, Element* el, int engine_number, struct Input
     Z_airbox = (standard_pressure *Ze / maxMAP) - Ze; // impedence of airbox
   }
   // Constant for Throttle impedence
-  Z_throttle=(PeakMeanPistonSpeed_fps/((IdleRPM * Stroke) / 360))*(standard_pressure/minMAP - 1) - Z_airbox; 
+  Z_throttle=(PeakMeanPistonSpeed_fps/((IdleRPM * Stroke) / 360))*(standard_pressure/minMAP - 1) - Z_airbox;
   //  Z_throttle=(MaxRPM/IdleRPM )*(standard_pressure/minMAP+2); // Constant for Throttle impedence
 
 // Default tables if not provided in the configuration file
@@ -518,7 +518,10 @@ void FGPiston::Calculate(void)
   }
 
   LoadThrusterInputs();
-  Thruster->Calculate(HP * hptoftlbssec);
+  // Filters out negative powers when the propeller is not rotating.
+  double power = HP * hptoftlbssec;
+  if (RPM <= 0.1) power = max(power, 0.0);
+  Thruster->Calculate(power);
 
   RunPostFunctions();
 }
@@ -528,7 +531,7 @@ void FGPiston::Calculate(void)
 double FGPiston::CalcFuelNeed(void)
 {
   FuelExpended = FuelFlowRate * in.TotalDeltaT;
-  if (!Starved) FuelUsedLbs += FuelExpended; 
+  if (!Starved) FuelUsedLbs += FuelExpended;
   return FuelExpended;
 }
 
@@ -589,7 +592,7 @@ void FGPiston::doEngineStartup(void)
   if ( Running ) {
     if (!spark || !fuel)    Running = false;
     if (RPM < IdleRPM*0.8 ) Running = false;
-  } else { // !Running  
+  } else { // !Running
     if ( spark && fuel) {     // start the engine if revs high enough
       if (RPM > IdleRPM*0.8)  // This allows us to in-air start
         Running = true;       // when windmilling
@@ -700,7 +703,7 @@ void FGPiston::doMAP(void)
   } else {
       BoostLossHP = 0;
   }
-  
+
   // And set the value in American units as well
   ManifoldPressure_inHg = MAP / inhgtopa;
 }
@@ -795,14 +798,14 @@ void FGPiston::doEnginePower(void)
   } else {
     // Power output when the engine is not running
     double torque, k_torque, rpm;  // Convienience term for use in the calculations
-    
+
     rpm = RPM < 1.0 ? 1.0 : RPM;
     if (Cranking) {
       if(RPM<StarterRPM) k_torque = 1.0-RPM/(StarterRPM);
       else k_torque = 0;
       torque = StarterTorque*k_torque*StarterGain;
       IndicatedHorsePower = torque * rpm / 5252;
-     } 
+     }
   }
 
   // Constant is (1/2) * 60 * 745.7

@@ -42,7 +42,6 @@ INCLUDES
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%*/
 
 #include <memory>
-#include <random>
 
 #include "models/FGPropagate.h"
 #include "models/FGOutput.h"
@@ -70,7 +69,12 @@ class FGInertial;
 class FGInput;
 class FGPropulsion;
 class FGMassBalance;
-class FGTrim;
+class FGLogger;
+
+class TrimFailureException : public BaseException {
+  public:
+    TrimFailureException(const std::string& msg) : BaseException(msg) {}
+};
 
 /*%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 CLASS DOCUMENTATION
@@ -177,10 +181,10 @@ CLASS DOCUMENTATION
 CLASS DECLARATION
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%*/
 
-class FGFDMExec : public FGJSBBase
+class JSBSIM_API FGFDMExec : public FGJSBBase
 {
   struct childData {
-    FGFDMExec* exec;
+    std::unique_ptr<FGFDMExec> exec;
     std::string info;
     FGColumnVector3 Loc;
     FGColumnVector3 Orient;
@@ -194,21 +198,17 @@ class FGFDMExec : public FGJSBBase
       mated = true;
       internal = false;
     }
-    
+
     void Run(void) {exec->Run();}
     void AssignState(FGPropagate* source_prop) {
       exec->GetPropagate()->SetVState(source_prop->GetVState());
-    }
-
-    ~childData(void) {
-      delete exec;
     }
   };
 
 public:
 
   /// Default constructor
-  FGFDMExec(FGPropertyManager* root = 0, unsigned int* fdmctr = 0);
+  FGFDMExec(FGPropertyManager* root = nullptr, std::shared_ptr<unsigned int> fdmctr = nullptr);
 
   /// Default destructor
   ~FGFDMExec();
@@ -252,6 +252,14 @@ public:
       @return true if successful */
   bool RunIC(void);
 
+  /** Loads the planet.
+      Loads the definition of the planet on which the vehicle will evolve such as
+      its radius, gravity or its atmosphere characteristics.
+      @param PlanetPath The name of a planet definition file
+      @param useAircraftPath true if path is given relative to the aircraft path.
+      @return true if successful */
+  bool LoadPlanet(const SGPath& PlanetPath, bool useAircraftPath = true);
+
   /** Loads an aircraft model.
       @param AircraftPath path to the aircraft/ directory. For instance:
       "aircraft". Under aircraft, then, would be directories for various
@@ -283,119 +291,141 @@ public:
       @return true if successful*/
   bool LoadModel(const std::string& model, bool addModelToPath = true);
 
-  /** Loads a script
+  /** Load a script
       @param Script The full path name and file name for the script to be loaded.
-      @param deltaT The simulation integration step size, if given.  If no value is supplied
-                    then 0.0 is used and the value is expected to be supplied in
-                    the script file itself.
-      @param initfile The initialization file that will override the initialization file
-                      specified in the script file. If no file name is given on the command line,
-                      the file specified in the script will be used. If an initialization file 
-                      is not given in either place, an error will result.
+      @param deltaT The simulation integration step size, if given.  If no value
+                    is supplied then 0.0 is used and the value is expected to be
+                    supplied in the script file itself.
+      @param initfile The initialization file that will override the
+                      initialization file specified in the script file. If no
+                      file name is given on the command line, the file specified
+                      in the script will be used. If an initialization file is
+                      not given in either place, an error will result.
       @return true if successfully loads; false otherwise. */
   bool LoadScript(const SGPath& Script, double deltaT=0.0,
                   const SGPath& initfile=SGPath());
 
-  /** Sets the path to the engine config file directories.
-      @param path path to the directory under which engine config
-      files are kept, for instance "engine"  */
+  /** Set the path to the engine config file directories.
+      Relative paths are taken from the root directory.
+      @param path path to the directory under which engine config files are
+                  kept, for instance "engine".
+      @see SetRootDir
+      @see GetEnginePath */
   bool SetEnginePath(const SGPath& path) {
     EnginePath = GetFullPath(path);
     return true;
   }
 
-  /** Sets the path to the aircraft config file directories.
-      @param path path to the aircraft directory. For instance:
-      "aircraft". Under aircraft, then, would be directories for various
-      modeled aircraft such as C172/, x15/, etc.  */
+  /** Set the path to the aircraft config file directories.
+      Under this path, then, would be directories for various modeled aircraft
+      such as C172/, x15/, etc.
+      Relative paths are taken from the root directory.
+      @param path path to the aircraft directory, for instance "aircraft".
+      @see SetRootDir
+      @see GetAircraftPath */
   bool SetAircraftPath(const SGPath& path) {
     AircraftPath = GetFullPath(path);
     return true;
   }
-  
-  /** Sets the path to the systems config file directories.
-      @param path path to the directory under which systems config
-      files are kept, for instance "systems"  */
+
+  /** Set the path to the systems config file directories.
+      Relative paths are taken from the root directory.
+      @param path path to the directory under which systems config files are
+                  kept, for instance "systems"
+      @see SetRootDir
+      @see GetSystemsPath */
   bool SetSystemsPath(const SGPath& path) {
     SystemsPath = GetFullPath(path);
     return true;
   }
-  
+
+  /** Set the directory where the output files will be written.
+      Relative paths are taken from the root directory.
+      @param path path to the directory under which the output files will be
+                  written.
+      @see SetRootDir
+      @see GetOutputPath */
+  bool SetOutputPath(const SGPath& path) {
+    OutputPath = GetFullPath(path);
+    return true;
+  }
+
   /// @name Top-level executive State and Model retrieval mechanism
   ///@{
   /// Returns the FGAtmosphere pointer.
-  FGAtmosphere* GetAtmosphere(void)    {return (FGAtmosphere*)Models[eAtmosphere];}
+  std::shared_ptr<FGAtmosphere>        GetAtmosphere(void) const;
   /// Returns the FGAccelerations pointer.
-  FGAccelerations* GetAccelerations(void)    {return (FGAccelerations*)Models[eAccelerations];}
+  std::shared_ptr<FGAccelerations>     GetAccelerations(void) const;
   /// Returns the FGWinds pointer.
-  FGWinds* GetWinds(void)    {return (FGWinds*)Models[eWinds];}
+  std::shared_ptr<FGWinds>             GetWinds(void) const;
   /// Returns the FGFCS pointer.
-  FGFCS* GetFCS(void)                  {return (FGFCS*)Models[eSystems];}
+  std::shared_ptr<FGFCS>               GetFCS(void) const;
   /// Returns the FGPropulsion pointer.
-  FGPropulsion* GetPropulsion(void)    {return (FGPropulsion*)Models[ePropulsion];}
+  std::shared_ptr<FGPropulsion>        GetPropulsion(void) const;
   /// Returns the FGAircraft pointer.
-  FGMassBalance* GetMassBalance(void)  {return (FGMassBalance*)Models[eMassBalance];}
+  std::shared_ptr<FGMassBalance>       GetMassBalance(void) const;
   /// Returns the FGAerodynamics pointer
-  FGAerodynamics* GetAerodynamics(void){return (FGAerodynamics*)Models[eAerodynamics];}
+  std::shared_ptr<FGAerodynamics>      GetAerodynamics(void) const;
   /// Returns the FGInertial pointer.
-  FGInertial* GetInertial(void)        {return (FGInertial*)Models[eInertial];}
+  std::shared_ptr<FGInertial>          GetInertial(void) const;
   /// Returns the FGGroundReactions pointer.
-  FGGroundReactions* GetGroundReactions(void) {return (FGGroundReactions*)Models[eGroundReactions];}
+  std::shared_ptr<FGGroundReactions>   GetGroundReactions(void) const;
   /// Returns the FGExternalReactions pointer.
-  FGExternalReactions* GetExternalReactions(void) {return (FGExternalReactions*)Models[eExternalReactions];}
+  std::shared_ptr<FGExternalReactions> GetExternalReactions(void) const;
   /// Returns the FGBuoyantForces pointer.
-  FGBuoyantForces* GetBuoyantForces(void) {return (FGBuoyantForces*)Models[eBuoyantForces];}
+  std::shared_ptr<FGBuoyantForces>     GetBuoyantForces(void) const;
   /// Returns the FGAircraft pointer.
-  FGAircraft* GetAircraft(void)        {return (FGAircraft*)Models[eAircraft];}
+  std::shared_ptr<FGAircraft>          GetAircraft(void) const;
   /// Returns the FGPropagate pointer.
-  FGPropagate* GetPropagate(void)      {return (FGPropagate*)Models[ePropagate];}
+  std::shared_ptr<FGPropagate>         GetPropagate(void) const;
   /// Returns the FGAuxiliary pointer.
-  FGAuxiliary* GetAuxiliary(void)      {return (FGAuxiliary*)Models[eAuxiliary];}
+  std::shared_ptr<FGAuxiliary>         GetAuxiliary(void) const;
   /// Returns the FGInput pointer.
-  FGInput* GetInput(void)              {return (FGInput*)Models[eInput];}
+  std::shared_ptr<FGInput>             GetInput(void) const;
   /// Returns the FGOutput pointer.
-  FGOutput* GetOutput(void)            {return (FGOutput*)Models[eOutput];}
+  std::shared_ptr<FGOutput>            GetOutput(void) const;
   /// Retrieves the script object
-  FGScript* GetScript(void) {return Script;}
+  std::shared_ptr<FGScript>            GetScript(void) const {return Script;}
   /// Returns a pointer to the FGInitialCondition object
-  FGInitialCondition* GetIC(void)      {return IC;}
+  std::shared_ptr<FGInitialCondition>  GetIC(void) const {return IC;}
   /// Returns a pointer to the FGTrim object
-  FGTrim* GetTrim(void);
+  std::shared_ptr<FGTrim>              GetTrim(void);
   ///@}
 
   /// Retrieves the engine path.
-  const SGPath& GetEnginePath(void)    {return EnginePath;}
+  const SGPath& GetEnginePath(void) { return EnginePath; }
   /// Retrieves the aircraft path.
-  const SGPath& GetAircraftPath(void)  {return AircraftPath;}
+  const SGPath& GetAircraftPath(void) { return AircraftPath; }
   /// Retrieves the systems path.
-  const SGPath& GetSystemsPath(void)   {return SystemsPath;}
+  const SGPath& GetSystemsPath(void) { return SystemsPath; }
   /// Retrieves the full aircraft path name.
-  const SGPath& GetFullAircraftPath(void) {return FullAircraftPath;}
+  const SGPath& GetFullAircraftPath(void) { return FullAircraftPath; }
+  /// Retrieves the path to the output files.
+  const SGPath& GetOutputPath(void) { return OutputPath; }
 
   /** Retrieves the value of a property.
       @param property the name of the property
       @result the value of the specified property */
-  inline double GetPropertyValue(const std::string& property)
-  { return instance->GetNode()->GetDouble(property); }
+  double GetPropertyValue(const std::string& property)
+  { return instance->GetNode()->getDoubleValue(property.c_str()); }
 
   /** Sets a property value.
       @param property the property to be set
       @param value the value to set the property to */
-  inline void SetPropertyValue(const std::string& property, double value) {
-    instance->GetNode()->SetDouble(property, value);
-  }
+  void SetPropertyValue(const std::string& property, double value)
+  { instance->GetNode()->setDoubleValue(property.c_str(), value); }
 
   /// Returns the model name.
   const std::string& GetModelName(void) const { return modelName; }
 
   /// Returns a pointer to the property manager object.
-  FGPropertyManager* GetPropertyManager(void);
+  std::shared_ptr<FGPropertyManager> GetPropertyManager(void) const { return instance; }
   /// Returns a vector of strings representing the names of all loaded models (future)
   std::vector <std::string> EnumerateFDMs(void);
   /// Gets the number of child FDMs.
-  int GetFDMCount(void) const {return (int)ChildFDMList.size();}
+  size_t GetFDMCount(void) const {return ChildFDMList.size();}
   /// Gets a particular child FDM.
-  childData* GetChildFDM(int i) const {return ChildFDMList[i];}
+  auto GetChildFDM(int i) const {return ChildFDMList[i];}
   /// Marks this instance of the Exec object as a "child" object.
   void SetChild(bool ch) {IsChild = ch;}
 
@@ -446,6 +476,11 @@ public:
   * - tNone  */
   void DoTrim(int mode);
 
+  /** Executes linearization with state-space output
+   * You must trim first to get an accurate state-space model
+   */
+  void DoLinearization(int);
+
   /// Disables data logging to all outputs.
   void DisableOutput(void) { Output->Disable(); }
   /// Enables data logging to all outputs.
@@ -460,20 +495,28 @@ public:
   void Resume(void) {holding = false;}
   /// Returns true if the simulation is Holding (i.e. simulation time is not moving).
   bool Holding(void) {return holding;}
+  /// Mode flags for ResetToInitialConditions
+  static const int START_NEW_OUTPUT    = 0x1;
+  static const int DONT_EXECUTE_RUN_IC = 0x2;
   /** Resets the initial conditions object and prepares the simulation to run
-      again. If mode is set to 1 the output instances will take special actions
-      such as closing the current output file and open a new one with a
-      different name.
+      again. If the mode's first bit is set the output instances will take special actions
+      such as closing the current output file and open a new one with a different name.
+      If the second bit is set then RunIC() won't be executed, leaving it to the caller
+      to call RunIC(), e.g. in case the caller wants to set some other state like control
+      surface deflections which would've been reset.
       @param mode Sets the reset mode.*/
   void ResetToInitialConditions(int mode);
   /// Sets the debug level.
   void SetDebugLevel(int level) {debug_lvl = level;}
 
+  void SetLogger(std::shared_ptr<FGLogger> logger) {Log = logger;}
+  std::shared_ptr<FGLogger> GetLogger(void) const {return Log;}
+
   struct PropertyCatalogStructure {
     /// Name of the property.
     std::string base_string;
     /// The node for the property.
-    FGPropertyNode_ptr node;
+    SGPropertyNode_ptr node;
   };
 
   /** Builds a catalog of properties.
@@ -486,9 +529,10 @@ public:
   *   A string is returned that contains a carriage return delimited list of all
   *   strings in the property catalog that matches the supplied check string.
   *   @param check The string to search for in the property catalog.
+  *   @param end_of_line End of line (CR+LF if needed for Windows).
   *   @return the carriage-return-delimited string containing all matching strings
   *               in the catalog.  */
-  std::string QueryPropertyCatalog(const std::string& check);
+  std::string QueryPropertyCatalog(const std::string& check, const std::string& end_of_line="\n");
 
   // Print the contents of the property catalog for the loaded aircraft.
   void PrintPropertyCatalog(void);
@@ -503,7 +547,7 @@ public:
   void SetTrimMode(int mode){ ta_mode = mode; }
   int GetTrimMode(void) const { return ta_mode; }
 
-  std::string GetPropulsionTankReport();
+  std::string GetPropulsionTankReport() const;
 
   /// Returns the cumulative simulation time in seconds.
   double GetSimTime(void) const { return sim_time; }
@@ -530,13 +574,23 @@ public:
       @param delta_t the time step in seconds.     */
   void Setdt(double delta_t) { dT = delta_t; }
 
-  /** Sets the root directory where JSBSim starts looking for its system
-      directories.
-      @param rootDir the string containing the root directory. */
+  /** Set the root directory that is used to obtain absolute paths from
+      relative paths.
+      Aircraft, engine, systems and output paths are not updated by this
+      method. You must call each methods (SetAircraftPath(), SetEnginePath(),
+      etc.) individually if you need to update these paths as well.
+      @param rootDir the path to the root directory.
+      @see GetRootDir
+      @see SetAircraftPath
+      @see SetEnginePath
+      @see SetSystemsPath
+      @see SetOutputPath
+       */
   void SetRootDir(const SGPath& rootDir) {RootDir = rootDir;}
 
-  /** Retrieves the Root Directory.
-      @return the string representing the root (base) JSBSim directory. */
+  /** Retrieve the Root Directory.
+      @return the path to the root (base) JSBSim directory.
+      @see SetRootDir */
   const SGPath& GetRootDir(void) const {return RootDir;}
 
   /** Increments the simulation time if not in Holding mode. The Frame counter
@@ -552,7 +606,7 @@ public:
 
   /** Initializes the simulation with initial conditions
       @param FGIC The initial conditions that will be passed to the simulation. */
-  void Initialize(FGInitialCondition *FGIC);
+  void Initialize(const FGInitialCondition* FGIC);
 
   /** Sets the property forces/hold-down. This allows to do hard 'hold-down'
       such as for rockets on a launch pad with engines ignited.
@@ -565,22 +619,27 @@ public:
   */
   bool GetHoldDown(void) const {return HoldDown;}
 
-  FGTemplateFunc* GetTemplateFunc(const std::string& name) {
+  FGTemplateFunc_ptr GetTemplateFunc(const std::string& name) {
     return TemplateFunctions.count(name) ? TemplateFunctions[name] : nullptr;
   }
 
   void AddTemplateFunc(const std::string& name, Element* el) {
-    TemplateFunctions[name] = new FGTemplateFunc(this, el);
+    TemplateFunctions[name] = std::make_shared<FGTemplateFunc>(this, el);
   }
 
-  const std::shared_ptr<std::default_random_engine>& GetRandomEngine(void) const
-  { return RandomEngine; }
+  auto GetRandomGenerator(void) const { return RandomGenerator; }
+
+  int  SRand(void) const { return RandomSeed; }
 
 private:
+  // Declare Log first so that it's destroyed last: the logger may be used by
+  // some FGFDMExec members to log data during their destruction.
+  std::shared_ptr<FGLogger> Log;
+
   unsigned int Frame;
   unsigned int IdFDM;
   int disperse;
-  unsigned short Terminate;
+  bool Terminate;
   double dT;
   double saved_dT;
   double sim_time;
@@ -595,11 +654,13 @@ private:
   SGPath FullAircraftPath;
   SGPath EnginePath;
   SGPath SystemsPath;
+  SGPath OutputPath;
   std::string CFGVersion;
   std::string Release;
   SGPath RootDir;
 
   // Standard Model pointers - shortcuts for internal executive use only.
+  // DO NOT TRY TO DELETE THEM !!!
   FGPropagate* Propagate;
   FGInertial* Inertial;
   FGAtmosphere* Atmosphere;
@@ -615,44 +676,44 @@ private:
   FGAircraft* Aircraft;
   FGAccelerations* Accelerations;
   FGOutput* Output;
+  FGInput* Input;
 
   bool trim_status;
   int ta_mode;
-  unsigned int ResetMode;
   int trim_completed;
 
-  FGScript*           Script;
-  FGInitialCondition* IC;
-  FGTrim*             Trim;
+  std::shared_ptr<FGInitialCondition> IC;
+  std::shared_ptr<FGScript>           Script;
+  std::shared_ptr<FGTrim>             Trim;
 
-  FGPropertyManager* Root;
-  bool StandAlone;
-  FGPropertyManager* instance;
+  SGPropertyNode_ptr Root;
+  std::shared_ptr<FGPropertyManager> instance;
 
   bool HoldDown;
 
-  int RandomSeed;
-  std::shared_ptr<std::default_random_engine> RandomEngine;
+  unsigned int RandomSeed;
+  std::shared_ptr<RandomNumberGenerator> RandomGenerator;
 
   // The FDM counter is used to give each child FDM an unique ID. The root FDM
   // has the ID 0
-  unsigned int*      FDMctr;
+  std::shared_ptr<unsigned int> FDMctr;
 
   std::vector <std::string> PropertyCatalog;
-  std::vector <childData*> ChildFDMList;
-  std::vector <FGModel*> Models;
+  std::vector <std::shared_ptr<childData>> ChildFDMList;
+  std::vector <std::shared_ptr<FGModel>> Models;
   std::map<std::string, FGTemplateFunc_ptr> TemplateFunctions;
 
   bool ReadFileHeader(Element*);
   bool ReadChild(Element*);
   bool ReadPrologue(Element*);
   void SRand(int sr);
-  int  SRand(void) const {return RandomSeed;}
   void LoadInputs(unsigned int idx);
   void LoadPlanetConstants(void);
+  bool LoadPlanet(Element* el);
   void LoadModelConstants(void);
   bool Allocate(void);
   bool DeAllocate(void);
+  void InitializeModels(void);
   int GetDisperse(void) const {return disperse;}
   SGPath GetFullPath(const SGPath& name) {
     if (name.isRelative())

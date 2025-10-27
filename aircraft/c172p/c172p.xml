@@ -6,7 +6,7 @@
 
     <fileheader>
         <author> Unknown </author>
-        <filecreationdate> 2002-01-01 </filecreationdate>
+        <filecreationdate>2002-01-01</filecreationdate>
         <version> $Id: c172p.xml,v 1.29 2013/10/25 15:32:49 jentron Exp $ </version>
         <description> Cessna C-172 </description>
       <note>
@@ -63,7 +63,7 @@
         </location>
         <pointmass name="Pilot">
             <weight unit="LBS"> 180 </weight>
-            <location name="POINTMASS" unit="IN">
+            <location unit="IN">
                 <x> 36 </x>
                 <y> -14 </y>
                 <z> 24 </z>
@@ -71,7 +71,7 @@
         </pointmass>
         <pointmass name="Co-Pilot">
             <weight unit="LBS"> 0 </weight>
-            <location name="POINTMASS" unit="IN">
+            <location unit="IN">
                 <x> 36 </x>
                 <y> 14 </y>
                 <z> 24 </z>
@@ -79,7 +79,7 @@
         </pointmass>
         <pointmass name="Left Passenger">
             <weight unit="LBS"> 0 </weight>
-            <location name="POINTMASS" unit="IN">
+            <location unit="IN">
                 <x> 70 </x>
                 <y> -14 </y>
                 <z> 24 </z>
@@ -87,7 +87,7 @@
         </pointmass>
         <pointmass name="Right Passenger">
             <weight unit="LBS"> 0 </weight>
-            <location name="POINTMASS" unit="IN">
+            <location unit="IN">
                 <x> 70 </x>
                 <y> 14 </y>
                 <z> 24 </z>
@@ -95,7 +95,7 @@
         </pointmass>
         <pointmass name="Baggage">
             <weight unit="LBS"> 0 </weight>
-            <location name="POINTMASS" unit="IN">
+            <location unit="IN">
                 <x> 95 </x>
                 <y>  0 </y>
                 <z> 24 </z>
@@ -200,16 +200,6 @@
     </ground_reactions>
     <propulsion>
         <engine file="eng_io320">
-            <location unit="IN">
-                <x> -19.7 </x>
-                <y> 0 </y>
-                <z> 26.6 </z>
-            </location>
-            <orient unit="DEG">
-                <roll> 0.0 </roll>
-                <pitch> 0 </pitch>
-                <yaw> 0 </yaw>
-            </orient>
             <feed>0</feed>
             <feed>1</feed>
             <thruster file="prop_75in2f">
@@ -469,7 +459,7 @@
    <property>propulsion/engine/prop-induced-velocity_fps</property>
    <property>propulsion/engine/prop-induced-velocity_fps</property>
   </sum>
- </function> 
+ </function>
 
  <function name="aero/function/qbar-induced-psf">
   <description> q bar including the propulsion induced velocity.</description>
@@ -479,7 +469,7 @@
    <property>atmosphere/rho-slugs_ft3</property>
    <value>0.5</value>
   </product>
- </function> 
+ </function>
 
         <axis name="DRAG">
             <function name="aero/coefficient/CDo">
@@ -554,7 +544,7 @@
                     <property>aero/qbar-psf</property>
                     <property>metrics/Sw-sqft</property>
                     <property>fcs/mag-elevator-pos-rad</property>
-                    <value>0.0000</value>
+                    <value>0.06</value>
                 </product>
             </function>
             <function name="aero/coefficient/CDbeta">

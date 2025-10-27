@@ -34,11 +34,10 @@
   INCLUDES
   %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%*/
 
-#include <stdexcept>
-
 #include "math/FGRealValue.h"
 #include "math/FGPropertyValue.h"
 #include "input_output/FGXMLElement.h"
+#include "input_output/string_utilities.h"
 
 /*%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
   FORWARD DECLARATIONS
@@ -60,25 +59,31 @@ class FGPropertyManager;
   DECLARATION: FGParameterValue
   %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%*/
 
-class FGParameterValue : public FGParameter
+class JSBSIM_API FGParameterValue : public FGParameter
 {
 public:
-  FGParameterValue(Element* el, FGPropertyManager* pm) {
-    string value = el->GetDataLine();
+  FGParameterValue(Element* el, std::shared_ptr<FGPropertyManager> pm)
+  : FGParameterValue(el->GetDataLine(), pm, el)
+  {
+    std::string value = el->GetDataLine();
 
     if (el->GetNumDataLines() != 1 || value.empty()) {
-      cerr << el->ReadFrom()
-           << "The element <" << el->GetName()
-           << "> must either contain a value number or a property name."
-           << endl;
-      throw invalid_argument("Illegal argument");
+      std::cerr << el->ReadFrom()
+                << "The element <" << el->GetName()
+                << "> must either contain a value number or a property name."
+                << std::endl;
+      throw BaseException("FGParameterValue: Illegal argument defining: " + el->GetName());
     }
-
-    Construct(value, pm);
   }
 
-  FGParameterValue(const std::string& value, FGPropertyManager* pm) {
-    Construct(value, pm);
+  FGParameterValue(const std::string& value, std::shared_ptr<FGPropertyManager> pm,
+                   Element* el) {
+    try {
+      param = new FGRealValue(atof_locale_c(value.c_str()));
+    } catch (InvalidNumber&) {
+      // "value" must be a property if execution passes to here.
+      param = new FGPropertyValue(value, pm, el);
+    }
   }
 
   double GetValue(void) const override { return param->GetValue(); }
@@ -89,7 +94,7 @@ public:
     if (v)
       return v->GetNameWithSign();
     else
-      return to_string(param->GetValue());
+      return param->GetName();
   }
 
   bool IsLateBound(void) const {
@@ -98,15 +103,6 @@ public:
   }
 private:
   FGParameter_ptr param;
-
-  void Construct(const std::string& value, FGPropertyManager* pm) {
-    if (is_number(value)) {
-      param = new FGRealValue(atof(value.c_str()));
-    } else {
-      // "value" must be a property if execution passes to here.
-      param = new FGPropertyValue(value, pm);
-    }
-  }
 };
 
 typedef SGSharedPtr<FGParameterValue> FGParameterValue_ptr;

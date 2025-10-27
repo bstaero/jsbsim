@@ -40,6 +40,7 @@ INCLUDES
 #include "FGKinemat.h"
 #include "input_output/FGXMLElement.h"
 #include "models/FGFCS.h"
+#include "input_output/FGLog.h"
 
 using namespace std;
 
@@ -52,35 +53,31 @@ CLASS IMPLEMENTATION
 FGKinemat::FGKinemat(FGFCS* fcs, Element* element)
   : FGFCSComponent(fcs, element)
 {
-  Element *traverse_element, *setting_element;
-  double tmpDetent;
-  double tmpTime;
-
-  Detents.clear();
-  TransitionTimes.clear();
+  CheckInputNodes(1, 1, element);
 
   Output = 0;
   DoScale = true;
 
   if (element->FindElement("noscale")) DoScale = false;
 
-  traverse_element = element->FindElement("traverse");
-  setting_element = traverse_element->FindElement("setting");
+  Element* traverse_element = element->FindElement("traverse");
+  Element* setting_element = traverse_element->FindElement("setting");
   while (setting_element) {
-    tmpDetent = setting_element->FindElementValueAsNumber("position");
-    tmpTime = setting_element->FindElementValueAsNumber("time");
+    double tmpDetent = setting_element->FindElementValueAsNumber("position");
+    double tmpTime = setting_element->FindElementValueAsNumber("time");
     Detents.push_back(tmpDetent);
     TransitionTimes.push_back(tmpTime);
     setting_element = traverse_element->FindNextElement("setting");
   }
 
   if (Detents.size() <= 1) {
-    cerr << "Kinematic component " << Name
-         << " must have more than 1 setting element" << endl;
-    exit(-1);
+    XMLLogException err(fcs->GetExec()->GetLogger(), element);
+    err << "\nKinematic component " << Name
+        << " must have more than 1 setting element\n";
+    throw err;
   }
 
-  bind(element);
+  bind(element, fcs->GetPropertyManager().get());
 
   Debug(0);
 }
@@ -165,7 +162,7 @@ bool FGKinemat::Run(void )
 //       variable is not set, debug_lvl is set to 1 internally
 //    0: This requests JSBSim not to output any messages
 //       whatsoever.
-//    1: This value explicity requests the normal JSBSim
+//    1: This value explicitly requests the normal JSBSim
 //       startup messages
 //    2: This value asks for a message to be printed out when
 //       a class is instantiated
@@ -181,20 +178,22 @@ void FGKinemat::Debug(int from)
   if (debug_lvl <= 0) return;
 
   if (debug_lvl & 1) { // Standard console startup message output
+    FGLogging log(fcs->GetExec()->GetLogger(), LogLevel::DEBUG);
     if (from == 0) { // Constructor
-      cout << "      INPUT: " << InputNodes[0]->GetName() << endl;
-      cout << "      DETENTS: " << Detents.size() << endl;
+      log << "      INPUT: " << InputNodes[0]->GetName() << "\n";
+      log << "      DETENTS: " << Detents.size() << fixed << setprecision(4) << "\n";
       for (unsigned int i=0;i<Detents.size();i++) {
-        cout << "        " << Detents[i] << " " << TransitionTimes[i] << endl;
+        log << "        " << Detents[i] << " " << TransitionTimes[i] << "\n";
       }
       for (auto node: OutputNodes)
-          cout << "      OUTPUT: " << node->getName() << endl;
-      if (!DoScale) cout << "      NOSCALE" << endl;
+          log << "      OUTPUT: " << node->getNameString() << "\n";
+      if (!DoScale) log << "      NOSCALE\n";
     }
   }
   if (debug_lvl & 2 ) { // Instantiation/Destruction notification
-    if (from == 0) cout << "Instantiated: FGKinemat" << endl;
-    if (from == 1) cout << "Destroyed:    FGKinemat" << endl;
+    FGLogging log(fcs->GetExec()->GetLogger(), LogLevel::DEBUG);
+    if (from == 0) log << "Instantiated: FGKinemat\n";
+    if (from == 1) log << "Destroyed:    FGKinemat\n";
   }
   if (debug_lvl & 4 ) { // Run() method entry print for FGModel-derived objects
   }

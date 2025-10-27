@@ -2,9 +2,6 @@ set(SOURCES easyxml.cxx)
 set(HEADERS easyxml.hxx)
 
 if(NOT EXPAT_FOUND)
-  add_definitions("-DHAVE_EXPAT_CONFIG_H")
-  include_directories(${CMAKE_CURRENT_SOURCE_DIR})
-
   list(APPEND SOURCES xmlparse.c
                       xmltok.c
                       xmlrole.c)
@@ -22,10 +19,12 @@ if(NOT EXPAT_FOUND)
                       xmlrole.h
                       xmltok.h
                       xmltok_impl.h
-                      expat_config.h)
+                      expat_config.h
+                      siphash.h)
 endif()
 
 add_library(Xml OBJECT ${HEADERS} ${SOURCES})
+target_include_directories(Xml PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 set_target_properties(Xml PROPERTIES TARGET_DIRECTORY
                           ${CMAKE_CURRENT_SOURCE_DIR})
 

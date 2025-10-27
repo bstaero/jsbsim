@@ -38,8 +38,10 @@ Also, see the header file (FGDistributor.h) for further details.
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 INCLUDES
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%*/
- 
+
 #include "FGDistributor.h"
+#include "models/FGFCS.h"
+#include "input_output/FGLog.h"
 
 using namespace std;
 
@@ -52,29 +54,45 @@ CLASS IMPLEMENTATION
 FGDistributor::FGDistributor(FGFCS* fcs, Element* element)
   : FGFCSComponent(fcs, element)
 {
-  bind(element); // Bind() this component here in case it is used in its own
-                 // definition for a sample-and-hold
+  auto PropertyManager = fcs->GetPropertyManager();
+
+  bind(element, PropertyManager.get()); // Bind() this component here in case it is used in its own
+                                        // definition for a sample-and-hold
 
   string type_string = element->GetAttributeValue("type");
   if (type_string == "inclusive") Type = eInclusive;
   else if (type_string == "exclusive") Type = eExclusive;
   else {
-    throw("Not a known Distributor type, "+type_string);
+    XMLLogException err(fcs->GetExec()->GetLogger(), element);
+    err << "Distributor type should be \"inclusive\" or \"exclusive\""
+        << " but got \"" << type_string << "\" instead.\n";
+    throw err;
   }
 
   Element* case_element = element->FindElement("case");
   while (case_element) {
-    Case* current_case = new Case;
+    auto current_case = make_unique<Case>();
     Element* test_element = case_element->FindElement("test");
-    if (test_element) current_case->SetTest(new FGCondition(test_element, PropertyManager));
+    try {
+      if (test_element) current_case->SetTest(test_element, PropertyManager);
+    } catch (XMLLogException&) {
+      throw;
+    } catch (LogException& e) {
+      throw XMLLogException(e, test_element);
+    } catch (const BaseException& e) {
+      XMLLogException err(fcs->GetExec()->GetLogger(), test_element);
+      err << LogFormat::RED << e.what() << LogFormat::RESET << "\n\n";
+      throw err;
+    }
     Element* prop_val_element = case_element->FindElement("property");
     while (prop_val_element) {
       string value_string = prop_val_element->GetAttributeValue("value");
       string property_string = prop_val_element->GetDataLine();
-      current_case->AddPropValPair(new PropValPair(property_string, value_string, PropertyManager));
+      current_case->AddPropValPair(property_string, value_string, PropertyManager,
+                                   prop_val_element);
       prop_val_element = case_element->FindNextElement("property");
     }
-    Cases.push_back(current_case);
+    Cases.push_back(std::move(current_case));
     case_element = element->FindNextElement("case");
   }
 
@@ -83,18 +101,10 @@ FGDistributor::FGDistributor(FGFCS* fcs, Element* element)
 
 //%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-FGDistributor::~FGDistributor()
-{
-  for (auto Case: Cases) delete Case;
-  Debug(1);
-}
-
-//%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
 bool FGDistributor::Run(void )
 {
   bool completed = false;
-  for (auto Case: Cases) { // Loop through all Cases
+  for (auto& Case: Cases) { // Loop through all Cases
     if (Case->HasTest()) {
       if (Case->GetTestResult() && !((Type == eExclusive) && completed)) {
         Case->SetPropValPairs();
@@ -116,7 +126,7 @@ bool FGDistributor::Run(void )
 //       variable is not set, debug_lvl is set to 1 internally
 //    0: This requests JSBSim not to output any messages
 //       whatsoever.
-//    1: This value explicity requests the normal JSBSim
+//    1: This value explicitly requests the normal JSBSim
 //       startup messages
 //    2: This value asks for a message to be printed out when
 //       a class is instantiated
@@ -133,29 +143,31 @@ void FGDistributor::Debug(int from)
 
   if (debug_lvl & 1) { // Standard console startup message output
     if (from == 0) { // Constructor
+      FGLogging log(fcs->GetExec()->GetLogger(), LogLevel::DEBUG);
       unsigned int ctr=0;
-      for (auto Case: Cases) {
-        std::cout << "      Case: " << ctr << endl;
+      for (const auto& Case: Cases) {
+        log << "      Case: " << fixed << ctr << "\n";
         if (Case->HasTest()) {
-          Case->GetTest()->PrintCondition("        ");
+          Case->GetTest().PrintCondition("        ");
         } else {
-          std::cout << "        Set these properties by default: " << std::endl;
+          log << "        Set these properties by default: \n";
         }
-        std::cout << std::endl;
-        for (auto propVal = Case->IterPropValPairs(); propVal != Case->EndPropValPairs(); ++propVal) {
-          std::cout << "        Set property " << (*propVal)->GetPropName();
-          if ((*propVal)->GetLateBoundProp()) std::cout << " (late bound)";
-          std::cout << " to " << (*propVal)->GetValString();
-          if ((*propVal)->GetLateBoundValue()) std::cout << " (late bound)";
-          std::cout << std::endl;
+        log << "\n";
+        for (const auto& propVal: *Case) {
+          log << "        Set property " << propVal->GetPropName();
+          if (propVal->GetLateBoundProp()) log << " (late bound)";
+          log << " to " << propVal->GetValString();
+          if (propVal->GetLateBoundValue()) log << " (late bound)";
+          log << "\n";
         }
         ctr++;
       }
     }
   }
   if (debug_lvl & 2 ) { // Instantiation/Destruction notification
-    if (from == 0) cout << "Instantiated: FGDistributor" << endl;
-    if (from == 1) cout << "Destroyed:    FGDistributor" << endl;
+    FGLogging log(fcs->GetExec()->GetLogger(), LogLevel::DEBUG);
+    if (from == 0) log << "Instantiated: FGDistributor\n";
+    if (from == 1) log << "Destroyed:    FGDistributor\n";
   }
   if (debug_lvl & 4 ) { // Run() method entry print for FGModel-derived objects
   }

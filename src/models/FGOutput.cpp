@@ -44,6 +44,8 @@ INCLUDES
 #include "input_output/FGOutputFG.h"
 #include "input_output/FGXMLFileRead.h"
 #include "input_output/FGModelLoader.h"
+#include "input_output/FGLog.h"
+#include "input_output/string_utilities.h"
 
 using namespace std;
 
@@ -55,12 +57,11 @@ CLASS IMPLEMENTATION
 
 FGOutput::FGOutput(FGFDMExec* fdmex) : FGModel(fdmex)
 {
-  typedef int (FGOutput::*iOPV)(void) const;
-
   Name = "FGOutput";
   enabled = true;
 
-  PropertyManager->Tie("simulation/force-output", this, (iOPV)0, &FGOutput::ForceOutput, false);
+  PropertyManager->Tie<FGOutput, int>("simulation/force-output", this, nullptr,
+                                      &FGOutput::ForceOutput);
 
   Debug(0);
 }
@@ -99,7 +100,7 @@ bool FGOutput::Run(bool Holding)
   if (!enabled) return true;
 
   for (auto output: OutputTypes)
-    output->Run();
+    output->Run(Holding);
 
   return false;
 }
@@ -173,10 +174,17 @@ bool FGOutput::SetDirectivesFile(const SGPath& fname)
 {
   FGXMLFileRead XMLFile;
   Element* document = XMLFile.LoadXMLDocument(fname);
-  bool result = Load(document);
+  if (!document) {
+    LogException err(FDMExec->GetLogger());
+    err << "Could not read directive file: " << fname;
+    throw err;
+  }
 
-  if (!result)
-    cerr << endl << "Aircraft output element has problems in file " << fname << endl;
+  bool result = Load(document);
+  if (!result) {
+    FGLogging log(FDMExec->GetLogger(), LogLevel::ERROR);
+    log << "\nAircraft output element has problems in file " << fname << "\n";
+  }
 
   return result;
 }
@@ -185,12 +193,15 @@ bool FGOutput::SetDirectivesFile(const SGPath& fname)
 
 bool FGOutput::Load(int subSystems, std::string protocol, std::string type,
                     std::string port, std::string name, double outRate,
-                    std::vector<FGPropertyNode_ptr> & outputProperties)
+                    std::vector<SGPropertyNode_ptr> & outputProperties)
 {
   size_t idx = OutputTypes.size();
   FGOutputType* Output = 0;
 
-  if (debug_lvl > 0) cout << endl << "  Output data set: " << idx << endl;
+  if (debug_lvl > 0) {
+    FGLogging log(FDMExec->GetLogger(), LogLevel::DEBUG);
+    log << "\n  Output data set: " << idx << "\n";
+  }
 
   type = to_upper(type);
 
@@ -211,7 +222,8 @@ bool FGOutput::Load(int subSystems, std::string protocol, std::string type,
   } else if (type == "TERMINAL") {
     // Not done yet
   } else if (type != string("NONE")) {
-    cerr << "Unknown type of output specified in config file" << endl;
+    FGLogging log(FDMExec->GetLogger(), LogLevel::ERROR);
+    log << "Unknown type of output specified in config file\n";
   }
 
   if (!Output) return false;
@@ -236,14 +248,17 @@ bool FGOutput::Load(Element* document, const SGPath& dir)
   includePath = dir;
 
   // Perform base class Pre-Load
-  if (!FGModel::Load(document, false))
+  if (!FGModel::Upload(document, false))
     return false;
 
   size_t idx = OutputTypes.size();
   string type = document->GetAttributeValue("type");
   FGOutputType* Output = 0;
 
-  if (debug_lvl > 0) cout << endl << "  Output data set: " << idx << "  " << endl;
+  if (debug_lvl > 0) {
+    FGLogging log(FDMExec->GetLogger(), LogLevel::DEBUG);
+    log << "\n  Output data set: " << idx << "  \n";
+  }
 
   type = to_upper(type);
 
@@ -258,7 +273,8 @@ bool FGOutput::Load(Element* document, const SGPath& dir)
   } else if (type == "TERMINAL") {
     // Not done yet
   } else if (type != string("NONE")) {
-    cerr << "Unknown type of output specified in config file" << endl;
+    FGLogging log(FDMExec->GetLogger(), LogLevel::ERROR);
+    log << "Unknown type of output specified in config file\n";
   }
 
   if (!Output) return false;
@@ -318,8 +334,9 @@ void FGOutput::Debug(int from)
     }
   }
   if (debug_lvl & 2 ) { // Instantiation/Destruction notification
-    if (from == 0) cout << "Instantiated: FGOutput" << endl;
-    if (from == 1) cout << "Destroyed:    FGOutput" << endl;
+    FGLogging log(FDMExec->GetLogger(), LogLevel::DEBUG);
+    if (from == 0) log << "Instantiated: FGOutput\n";
+    if (from == 1) log << "Destroyed:    FGOutput\n";
   }
   if (debug_lvl & 4 ) { // Run() method entry print for FGModel-derived objects
   }

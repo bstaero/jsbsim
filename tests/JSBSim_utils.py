@@ -2,7 +2,7 @@
 #
 # Some utilities to help developing Python scripts with JSBSim.
 #
-# Copyright (c) 2014 Bertrand Coconnier
+# Copyright (c) 2014-2020 Bertrand Coconnier
 #
 # This program is free software; you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free Software
@@ -25,6 +25,10 @@ import pandas as pd
 sys.path.append(os.getcwd())
 
 import jsbsim
+
+
+# Hides startup and debug messages
+jsbsim.FGJSBBase().debug_lvl = 0
 
 
 class SandBox:
@@ -160,7 +164,7 @@ class JSBSimTestCase(unittest.TestCase):
 
             fullpath = os.path.join(script_path, f)
 
-            # Does f contains a JSBSim script ?
+            # Does f contain a JSBSim script ?
             if CheckXMLFile(fullpath, 'runscript'):
                 yield fullpath
 
@@ -169,9 +173,7 @@ class JSBSimTestCase(unittest.TestCase):
         return self._fdm
 
     def delete_fdm(self):
-        if self._fdm:
-            del self._fdm
-            self._fdm = None
+        self._fdm = None
 
     def load_script(self, script_name):
         script_path = self.sandbox.path_to_jsbsim_file('scripts',
@@ -222,6 +224,10 @@ class FlightModel:
         system_tag = et.SubElement(self.root, 'system')
         system_tag.attrib['file'] = file_name
 
+    def include_planet_test_file(self, file_name):
+        system_tag = et.SubElement(self.root, 'planet')
+        system_tag.attrib['file'] = file_name
+
     def before_loading(self):
         pass
 
@@ -260,9 +266,8 @@ def FindDifferences(ref, other, tol):
     delta = np.abs(ref - other)
 
     idxmax = delta.idxmax()
-    ref_max = pd.Series(ref.lookup(idxmax, ref.columns), index=ref.columns)
-    other_max = pd.Series(other.lookup(idxmax, other.columns),
-                          index=other.columns)
+    ref_max = pd.Series(np.diag(ref.loc[idxmax]), index=ref.columns)
+    other_max = pd.Series(np.diag(other.loc[idxmax]), index=other.columns)
     diff = pd.concat([idxmax, delta.max(), ref_max, other_max], axis=1)
     diff.columns = ['Time', 'delta', 'ref value', 'value']
     return diff[diff['delta'] > tol]

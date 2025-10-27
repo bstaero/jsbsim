@@ -37,13 +37,11 @@ HISTORY
 INCLUDES
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%*/
 
-#include <cstring>
-#include <cstdlib>
-#include <sstream>
-
 #include "FGUDPInputSocket.h"
 #include "FGFDMExec.h"
-#include "input_output/FGXMLElement.h"
+#include "FGXMLElement.h"
+#include "string_utilities.h"
+#include "FGLog.h"
 
 using namespace std;
 
@@ -66,18 +64,19 @@ bool FGUDPInputSocket::Load(Element* el)
 {
   if (!FGInputSocket::Load(el))
     return false;
-   
+
   rate = atoi(el->GetAttributeValue("rate").c_str());
   SetRate(0.5 + 1.0/(FDMExec->GetDeltaT()*rate));
-  
+
   Element *property_element = el->FindElement("property");
 
   while (property_element) {
     string property_str = property_element->GetDataLine();
-    FGPropertyNode* node = PropertyManager->GetNode(property_str);
+    SGPropertyNode* node = PropertyManager->GetNode(property_str);
     if (!node) {
-      cerr << fgred << highint << endl << "  No property by the name "
-           << property_str << " can be found." << reset << endl;
+      FGXMLLogging log(FDMExec->GetLogger(), property_element, LogLevel::ERROR);
+      log << LogFormat::RED << LogFormat::BOLD << "\n  No property by the name "
+          << property_str << " can be found.\n" << LogFormat::RESET;
     } else {
       InputProperties.push_back(node);
     }
@@ -92,36 +91,42 @@ bool FGUDPInputSocket::Load(Element* el)
 void FGUDPInputSocket::Read(bool Holding)
 {
   if (socket == 0) return;
-    
+
   data = socket->Receive();
- 
-  if (data.size() > 0) {
-  
+
+  if (!data.empty()) {
+
     vector<string> tokens;
     stringstream ss(data);
     string temp;
     while (getline(ss, temp, ',')) {
        tokens.push_back(temp);
     }
-    
+
     vector<double> values;
-  
-    for (unsigned int i=0; i<tokens.size(); i++) {
-      values.push_back( atof(tokens[i].c_str()) );
-     }
-     
+
+    try {
+      for (string& token : tokens)
+        values.push_back(atof_locale_c(token));
+    } catch(InvalidNumber& e) {
+      FGLogging log(FDMExec->GetLogger(), LogLevel::ERROR);
+      log << e.what() << "\n";
+      return;
+    }
+
     if (values[0] < oldTimeStamp) {
       return;
     } else {
       oldTimeStamp = values[0];
     }
-     
-    // the zeroeth value is the time stamp 
+
+    // the zeroeth value is the time stamp
     if ((values.size() - 1) != InputProperties.size()) {
-      cerr << endl << "Mismatch between UDP input property and value counts." << endl;
+      FGLogging log(FDMExec->GetLogger(), LogLevel::ERROR);
+      log << "\nMismatch between UDP input property and value counts.\n";
       return;
     }
-    
+
     for (unsigned int i=1; i<values.size(); i++) {
       InputProperties[i-1]->setDoubleValue(values[i]);
     }

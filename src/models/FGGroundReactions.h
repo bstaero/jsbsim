@@ -76,13 +76,12 @@ CLASS DOCUMENTATION
 CLASS DECLARATION
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%*/
 
-class FGGroundReactions : public FGModel, public FGSurface
+class JSBSIM_API FGGroundReactions : public FGModel, public FGSurface
 {
 public:
   FGGroundReactions(FGFDMExec*);
-  ~FGGroundReactions(void);
 
-  bool InitModel(void);
+  bool InitModel(void) override;
   /** Runs the Ground Reactions model; called by the Executive
       Can pass in a value indicating if the executive is directing the simulation to Hold.
       @param Holding if true, the executive has been directed to hold the sim from 
@@ -90,8 +89,8 @@ public:
                      model, which may need to be active to listen on a socket for the
                      "Resume" command to be given.
       @return false if no error */
-  bool Run(bool Holding);
-  virtual bool Load(Element* el);
+  bool Run(bool Holding) override;
+  bool Load(Element* el) override;
   const FGColumnVector3& GetForces(void) const {return vForces;}
   double GetForces(int idx) const {return vForces(idx);}
   const FGColumnVector3& GetMoments(void) const {return vMoments;}
@@ -107,7 +106,7 @@ public:
   /** Gets a gear instance
       @param gear index of gear instance
       @return a pointer to the FGLGear instance of the gear unit requested */
-  FGLGear* GetGearUnit(int gear) const { return lGear[gear]; }
+  auto GetGearUnit(int gear) const { return lGear[gear]; }
 
   /** Gets the steering command.
       @return steering command in range from -1.0 - 1.0 */
@@ -123,14 +122,14 @@ public:
   FGLGear::Inputs in;
 
 private:
-  std::vector <FGLGear*> lGear;
+  std::vector <std::shared_ptr<FGLGear>> lGear;
   FGColumnVector3 vForces;
   FGColumnVector3 vMoments;
   std::vector <LagrangeMultiplier*> multipliers;
   double DsCmd;
 
   void bind(void);
-  void Debug(int from);
+  void Debug(int from) override;
 };
 }
 //%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

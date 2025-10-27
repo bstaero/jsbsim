@@ -50,7 +50,7 @@ namespace JSBSim {
 CLASS DOCUMENTATION
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%*/
 
-/** Implements a UDP input socket. 
+/** Implements a UDP input socket.
  */
 
 /*%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -66,16 +66,16 @@ public:
   /** Reads the property names from an XML file.
       @param element The root XML Element of the input file.
   */
-  bool Load(Element* el);
+  bool Load(Element* el) override;
 
   /// Reads the socket and updates properties accordingly.
-  void Read(bool Holding);
+  void Read(bool Holding) override;
 
 protected:
 
   int rate;
   double oldTimeStamp;
-  std::vector<FGPropertyNode_ptr> InputProperties;
+  std::vector<SGPropertyNode_ptr> InputProperties;
 };
 }
 //%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%

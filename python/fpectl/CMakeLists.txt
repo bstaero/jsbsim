@@ -1,15 +1,30 @@
 # Build the fpectl module
+
+option(FPECTL_DISPLAY_STACK_TRACE "Set to ON to display the stack trace when a floating point exception is raised" OFF)
+
 if (APPLE)
   file(COPY fpectl.py DESTINATION ${CMAKE_BINARY_DIR}/tests)
 else()
-  execute_process(COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_SOURCE_DIR}/python/findModuleFileName.py fpectl OUTPUT_VARIABLE FPECTL_MODULE_NAME)
-  set(FPECTL_PYTHON_MODULE ${CMAKE_BINARY_DIR}/tests/${FPECTL_MODULE_NAME})
+  python3_add_library(fpectl MODULE ${PROJECT_SOURCE_DIR}/python/ExceptionManagement.h
+                                    fpectlmodule.h
+                                    fpectlmodule.cpp)
+  set_target_properties(fpectl PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
 
-  add_custom_command(OUTPUT ${FPECTL_PYTHON_MODULE}
-    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/fpectlmodule.h ${CMAKE_CURRENT_SOURCE_DIR}/fpectlmodule.cpp
-    COMMAND ${PYTHON_EXECUTABLE} setup.py build_ext -b ${CMAKE_BINARY_DIR}/tests
-    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-    COMMENT "Building fpectl module...")
+  # Output directories for MSVC
+  set_target_properties(fpectl PROPERTIES LIBRARY_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/tests)
+  set_target_properties(fpectl PROPERTIES LIBRARY_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/tests)
+  set_target_properties(fpectl PROPERTIES LIBRARY_OUTPUT_DIRECTORY_MINSIZEREL ${CMAKE_BINARY_DIR}/tests)
+  set_target_properties(fpectl PROPERTIES LIBRARY_OUTPUT_DIRECTORY_RELWITHDEBINFO ${CMAKE_BINARY_DIR}/tests)
 
-  add_custom_target(fpectl ALL DEPENDS ${FPECTL_PYTHON_MODULE})
+  if(FPECTL_DISPLAY_STACK_TRACE)
+    find_package(Backward)
+    if(BACKWARD_FOUND)
+      target_include_directories(fpectl PRIVATE ${BACKWARD_INCLUDE_DIR})
+      target_compile_definitions(fpectl PRIVATE BACKWARD_FOUND)
+      if(LIBBFD_FOUND)
+        target_link_libraries(fpectl PRIVATE bfd)
+        target_compile_definitions(fpectl PRIVATE LIBBFD_FOUND)
+      endif(LIBBFD_FOUND)
+    endif(BACKWARD_FOUND)
+  endif(FPECTL_DISPLAY_STACK_TRACE)
 endif(APPLE)

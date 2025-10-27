@@ -54,7 +54,7 @@ FGTank::FGTank(FGFDMExec* exec, Element* el, int tank_number)
   string token, strFuelName;
   Element* element;
   Element* element_Grain;
-  FGPropertyManager *PropertyManager = exec->GetPropertyManager();
+  auto PropertyManager = exec->GetPropertyManager();
   Area = 1.0;
   Density = 6.6;
   InitialTemperature = Temperature = -9999.0;
@@ -70,10 +70,12 @@ FGTank::FGTank(FGFDMExec* exec, Element* el, int tank_number)
   ixx_unit = iyy_unit = izz_unit = 1.0;
   grainType = gtUNKNOWN; // This is the default
 
-  type = el->GetAttributeValue("type");
+  string type = el->GetAttributeValue("type");
   if      (type == "FUEL")     Type = ttFUEL;
   else if (type == "OXIDIZER") Type = ttOXIDIZER;
   else                         Type = ttUNKNOWN;
+
+  Name = el->GetAttributeValue("name");
 
   element = el->FindElement("location");
   if (element)  vXYZ = element->FindElementTripletConvertTo("IN");
@@ -144,7 +146,7 @@ FGTank::FGTank(FGFDMExec* exec, Element* el, int tank_number)
   element_Grain = el->FindElement("grain_config");
   if (element_Grain) {
 
-    strGType = element_Grain->GetAttributeValue("type");
+    string strGType = element_Grain->GetAttributeValue("type");
     if (strGType == "CYLINDRICAL")     grainType = gtCYLINDRICAL;
     else if (strGType == "ENDBURNING") grainType = gtENDBURNING;
     else if (strGType == "FUNCTION")   {
@@ -193,10 +195,9 @@ FGTank::FGTank(FGFDMExec* exec, Element* el, int tank_number)
     switch (grainType) {
       case gtCYLINDRICAL:
         if (Radius <= InnerRadius) {
-          cerr << element_Grain->ReadFrom()
-               << "The bore diameter should be smaller than the total grain diameter!"
-               << endl;
-          exit(-1);
+          const string s("The bore diameter should be smaller than the total grain diameter!");
+          cerr << element_Grain->ReadFrom() << endl << s << endl;
+          throw BaseException(s);
         }
         Volume = M_PI * Length * (Radius*Radius - InnerRadius*InnerRadius); // cubic inches
         break;
@@ -207,10 +208,11 @@ FGTank::FGTank(FGFDMExec* exec, Element* el, int tank_number)
         Volume = 1;  // Volume is irrelevant for the FUNCTION type, but it can't be zero!
         break;
       case gtUNKNOWN:
-        cerr << el->ReadFrom()
-             << "Unknown grain type found in this rocket engine definition."
-             << endl;
-        exit(-1);
+        {
+          const string s("Unknown grain type found in this rocket engine definition.");
+          cerr << el->ReadFrom() << endl << s << endl;
+          throw BaseException(s);
+        }
     }
     Density = (Capacity*lbtoslug)/Volume; // slugs/in^3
   }
@@ -221,9 +223,9 @@ FGTank::FGTank(FGFDMExec* exec, Element* el, int tank_number)
   Area = 40.0 * pow(Capacity/1975, 0.666666667);
 
   // A named fuel type will override a previous density value
-  if (!strFuelName.empty()) Density = ProcessFuelName(strFuelName); 
+  if (!strFuelName.empty()) Density = ProcessFuelName(strFuelName);
 
-  bind(PropertyManager);
+  bind(PropertyManager.get());
 
   Debug(0);
 }
@@ -375,8 +377,9 @@ void FGTank::CalculateInertias(void)
     } else if (Contents <= 0.0) {
       Volume = 0;
     } else {
-      cerr << endl << "  Solid propellant grain density is zero!" << endl << endl;
-      exit(-1);
+      const string s("  Solid propellant grain density is zero!");
+      cerr << endl << s << endl;
+      throw BaseException(s);
     }
 
     switch (grainType) {
@@ -399,9 +402,11 @@ void FGTank::CalculateInertias(void)
       Izz = function_izz->GetValue()*izz_unit;
       break;
     default:
-      cerr << "Unknown grain type found." << endl;
-      exit(-1);
-      break;
+      {
+        const string s("Unknown grain type found.");
+        cerr << s << endl;
+        throw BaseException(s);
+      }
     }
 
   } else { // assume liquid propellant: shrinking snowball
@@ -415,7 +420,7 @@ void FGTank::CalculateInertias(void)
 
 double FGTank::ProcessFuelName(const std::string& name)
 {
-   if      (name == "AVGAS")    return 6.02; 
+   if      (name == "AVGAS")    return 6.02;
    else if (name == "JET-A")    return 6.74;
    else if (name == "JET-A1")   return 6.74;
    else if (name == "JET-B")    return 6.48;
@@ -442,7 +447,7 @@ double FGTank::ProcessFuelName(const std::string& name)
    else if (name == "AVCAT")    return 6.81;
    else {
      cerr << "Unknown fuel type specified: "<< name << endl;
-   } 
+   }
 
    return 6.6;
 }
@@ -511,7 +516,20 @@ void FGTank::Debug(int from)
 
   if (debug_lvl & 1) { // Standard console startup message output
     if (from == 0) { // Constructor
-      cout << "      " << type << " tank holds " << Capacity << " lbs. " << type << endl;
+      string type;
+      switch (Type) {
+      case ttFUEL:
+        type = "FUEL";
+        break;
+      case ttOXIDIZER:
+        type = "OXIDIZER";
+        break;
+      default:
+        type = "UNKNOWN";
+        break;
+      }
+
+      cout << "      " << Name << " (" << type << ") tank holds " << Capacity << " lbs. " << type << endl;
       cout << "      currently at " << PctFull << "% of maximum capacity" << endl;
       cout << "      Tank location (X, Y, Z): " << vXYZ(eX) << ", " << vXYZ(eY) << ", " << vXYZ(eZ) << endl;
       cout << "      Effective radius: " << Radius << " inches" << endl;

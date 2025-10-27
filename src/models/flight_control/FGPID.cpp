@@ -36,7 +36,9 @@ INCLUDES
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%*/
 
 #include "FGPID.h"
+#include "models/FGFCS.h"
 #include "math/FGParameterValue.h"
+#include "input_output/FGLog.h"
 
 using namespace std;
 
@@ -57,6 +59,9 @@ FGPID::FGPID(FGFCS* fcs, Element* element) : FGFCSComponent(fcs, element)
   IsStandard = false;
   IntType = eNone;       // No integrator initially defined.
 
+  CheckInputNodes(1, 1, element);
+
+  auto PropertyManager = fcs->GetPropertyManager();
   string pid_type = element->GetAttributeValue("type");
 
   if (pid_type == "standard") IsStandard = true;
@@ -96,20 +101,20 @@ FGPID::FGPID(FGFCS* fcs, Element* element) : FGFCSComponent(fcs, element)
 
   el = element->FindElement("pvdot");
   if (el)
-    ProcessVariableDot = new FGPropertyValue(el->GetDataLine(), PropertyManager);
+    ProcessVariableDot = new FGPropertyValue(el->GetDataLine(), PropertyManager, el);
 
   el = element->FindElement("trigger");
   if (el)
-    Trigger = new FGPropertyValue(el->GetDataLine(), PropertyManager);
+    Trigger = new FGPropertyValue(el->GetDataLine(), PropertyManager, el);
 
-  bind(el);
+  bind(el, PropertyManager.get());
 }
 
 //%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-void FGPID::bind(Element *el)
+void FGPID::bind(Element *el, FGPropertyManager* PropertyManager)
 {
-  FGFCSComponent::bind(el);
+  FGFCSComponent::bind(el, PropertyManager);
 
   string tmp;
   if (Name.find("/") == string::npos) {
@@ -117,9 +122,8 @@ void FGPID::bind(Element *el)
   } else {
     tmp = Name;
   }
-  typedef double (FGPID::*PMF)(void) const;
-  PropertyManager->Tie(tmp+"/initial-integrator-value", this, (PMF)nullptr,
-                       &FGPID::SetInitialOutput);
+  PropertyManager->Tie<FGPID, double>(tmp+"/initial-integrator-value", this,
+                                      nullptr, &FGPID::SetInitialOutput);
 
   Debug(0);
 }
@@ -190,7 +194,7 @@ bool FGPID::Run(void )
   }
 
   if (test < 0.0) I_out_total = 0.0;  // Reset integrator to 0.0
-  
+
   I_out_total += Ki->GetValue() * dt * I_out_delta;
 
   if (IsStandard)
@@ -215,7 +219,7 @@ bool FGPID::Run(void )
 //       variable is not set, debug_lvl is set to 1 internally
 //    0: This requests JSBSim not to output any messages
 //       whatsoever.
-//    1: This value explicity requests the normal JSBSim
+//    1: This value explicitly requests the normal JSBSim
 //       startup messages
 //    2: This value asks for a message to be printed out when
 //       a class is instantiated
@@ -231,16 +235,18 @@ void FGPID::Debug(int from)
   if (debug_lvl <= 0) return;
 
   if (debug_lvl & 1) { // Standard console startup message output
+    FGLogging log(fcs->GetExec()->GetLogger(), LogLevel::DEBUG);
     if (from == 0) { // Constructor
-      cout << "      INPUT: " << InputNodes[0]->GetNameWithSign() << endl;
+      log << "      INPUT: " << InputNodes[0]->GetNameWithSign() << "\n";
 
       for (auto node: OutputNodes)
-        cout << "      OUTPUT: " << node->getName() << endl;
+        log << "      OUTPUT: " << node->getNameString() << "\n";
     }
   }
   if (debug_lvl & 2 ) { // Instantiation/Destruction notification
-    if (from == 0) cout << "Instantiated: FGPID" << endl;
-    if (from == 1) cout << "Destroyed:    FGPID" << endl;
+    FGLogging log(fcs->GetExec()->GetLogger(), LogLevel::DEBUG);
+    if (from == 0) log << "Instantiated: FGPID\n";
+    if (from == 1) log << "Destroyed:    FGPID\n";
   }
   if (debug_lvl & 4 ) { // Run() method entry print for FGModel-derived objects
   }

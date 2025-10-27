@@ -14,12 +14,18 @@ import sys
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute.
 
-sys.path.insert(0, '${CMAKE_BINARY_DIR}/tests')
+try:
+    import jsbsim
+except ModuleNotFoundError:
+    # If the JSBSim module is not installed gloablly then use the one from the `tests`
+    # folder.
+    sys.path.insert(0, '${CMAKE_BINARY_DIR}/tests')
+
 
 # -- Project information -----------------------------------------------------
 
 project = u'JSBSim'
-copyright = u'2019, ${PROJECT_CONTACT_VENDOR}'
+copyright = u'${THIS_YEAR}, ${PROJECT_CONTACT_VENDOR}'
 author = u'${PROJECT_CONTACT_VENDOR}'
 
 # The short X.Y version
@@ -58,7 +64,7 @@ master_doc = 'index'
 #
 # This is also used if you do content translation via gettext catalogs.
 # Usually you set "language" from the command line for these cases.
-language = None
+language = 'en'
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
@@ -86,7 +92,6 @@ html_theme_options = {
     "github_banner": True,
     "github_user" : "JSBSim-Team",
     "github_repo": "jsbsim",
-    "travis_button" : True,
 }
 
 # Add any paths that contain custom static files (such as style sheets) here,
@@ -103,7 +108,7 @@ html_static_path = []
 # 'searchbox.html']``.
 #
 # html_sidebars = {}
-html_logo = "${CMAKE_SOURCE_DIR}/doc/logo_JSBSIM_globe.png"
+html_logo = "${PROJECT_SOURCE_DIR}/doc/logo_JSBSIM_globe.png"
 
 
 # -- Options for HTMLHelp output ---------------------------------------------

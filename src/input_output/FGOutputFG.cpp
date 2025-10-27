@@ -49,6 +49,7 @@ INCLUDES
 #include "models/propulsion/FGPiston.h"
 #include "models/propulsion/FGElectric.h"
 #include "models/propulsion/FGTank.h"
+#include "FGLog.h"
 
 #if defined(WIN32) && !defined(__CYGWIN__)
 #  include <windows.h>
@@ -120,23 +121,24 @@ FGOutputFG::FGOutputFG(FGFDMExec* fdmex) :
   memset(&fgSockBuf, 0x0, sizeof(fgSockBuf));
 
   if (fdmex->GetDebugLevel() > 0) {
+    FGLogging log(fdmex->GetLogger(), LogLevel::ERROR);
     // Engine status
     if (Propulsion->GetNumEngines() > FGNetFDM::FG_MAX_ENGINES)
-      cerr << "This vehicle has " << Propulsion->GetNumEngines() << " engines, but the current " << endl
-           << "version of FlightGear's FGNetFDM only supports " << FGNetFDM::FG_MAX_ENGINES << " engines." << endl
-           << "Only the first " << FGNetFDM::FG_MAX_ENGINES << " engines will be used." << endl;
+      log << "This vehicle has " << Propulsion->GetNumEngines() << " engines, but the current \n"
+          << "version of FlightGear's FGNetFDM only supports " << FGNetFDM::FG_MAX_ENGINES << " engines.\n"
+          << "Only the first " << FGNetFDM::FG_MAX_ENGINES << " engines will be used.\n";
 
     // Consumables
     if (Propulsion->GetNumTanks() > FGNetFDM::FG_MAX_TANKS)
-      cerr << "This vehicle has " << Propulsion->GetNumTanks() << " tanks, but the current " << endl
-           << "version of FlightGear's FGNetFDM only supports " << FGNetFDM::FG_MAX_TANKS << " tanks." << endl
-           << "Only the first " << FGNetFDM::FG_MAX_TANKS << " tanks will be used." << endl;
+      log << "This vehicle has " << Propulsion->GetNumTanks() << " tanks, but the current \n"
+          << "version of FlightGear's FGNetFDM only supports " << FGNetFDM::FG_MAX_TANKS << " tanks.\n"
+          << "Only the first " << FGNetFDM::FG_MAX_TANKS << " tanks will be used.\n";
 
     // Gear status
     if (GroundReactions->GetNumGearUnits() > FGNetFDM::FG_MAX_WHEELS)
-      cerr << "This vehicle has " << GroundReactions->GetNumGearUnits() << " bogeys, but the current " << endl
-           << "version of FlightGear's FGNetFDM only supports " << FGNetFDM::FG_MAX_WHEELS << " bogeys." << endl
-           << "Only the first " << FGNetFDM::FG_MAX_WHEELS << " bogeys will be used." << endl;
+      log << "This vehicle has " << GroundReactions->GetNumGearUnits() << " bogeys, but the current \n"
+          << "version of FlightGear's FGNetFDM only supports " << FGNetFDM::FG_MAX_WHEELS << " bogeys.\n"
+          << "Only the first " << FGNetFDM::FG_MAX_WHEELS << " bogeys will be used.\n";
   }
 }
 
@@ -217,7 +219,7 @@ void FGOutputFG::SocketDataFill(FGNetFDM* net)
   net->num_engines = min(FGNetFDM::FG_MAX_ENGINES,Propulsion->GetNumEngines()); // Number of valid engines
 
   for (i=0; i<net->num_engines; i++) {
-    FGEngine* engine = Propulsion->GetEngine(i);
+    auto engine = Propulsion->GetEngine(i);
     if (engine->GetRunning())
       net->eng_state[i] = 2;       // Engine state running
     else if (engine->GetCranking())
@@ -230,7 +232,7 @@ void FGOutputFG::SocketDataFill(FGNetFDM* net)
       break;
     case (FGEngine::etPiston):
       {
-        FGPiston* piston_engine = static_cast<FGPiston*>(engine);
+        auto piston_engine = static_pointer_cast<FGPiston>(engine);
         net->rpm[i]       = (float)(piston_engine->getRPM());
         net->fuel_flow[i] = (float)(piston_engine->getFuelFlow_gph());
         net->fuel_px[i]   = 0; // Fuel pressure, psi  (N/A in current model)
@@ -247,7 +249,7 @@ void FGOutputFG::SocketDataFill(FGNetFDM* net)
     case (FGEngine::etTurboprop):
       break;
     case (FGEngine::etElectric):
-      net->rpm[i] = static_cast<float>(static_cast<FGElectric*>(engine)->getRPM());
+      net->rpm[i] = static_cast<float>(static_pointer_cast<FGElectric>(engine)->getRPM());
       break;
     case (FGEngine::etUnknown):
       break;
@@ -257,7 +259,7 @@ void FGOutputFG::SocketDataFill(FGNetFDM* net)
   net->num_tanks = min(FGNetFDM::FG_MAX_TANKS, Propulsion->GetNumTanks());   // Max number of fuel tanks
 
   for (i=0; i<net->num_tanks; i++) {
-    net->fuel_quantity[i] = (float)(((FGTank *)Propulsion->GetTank(i))->GetContents());
+    net->fuel_quantity[i] = static_cast<float>(Propulsion->GetTank(i)->GetContents());
   }
 
   net->num_wheels  = min(FGNetFDM::FG_MAX_WHEELS, GroundReactions->GetNumGearUnits());
@@ -280,7 +282,7 @@ void FGOutputFG::SocketDataFill(FGNetFDM* net)
     // Default to sending constant dummy value to ensure backwards-compatibility
     net->cur_time = 1234567890u;
   }
-  
+
   net->warp        = 0;                       // offset in seconds to unix time
   net->visibility  = 25000.0;                 // visibility in meters (for env. effects)
 

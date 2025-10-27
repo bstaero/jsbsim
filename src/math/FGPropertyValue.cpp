@@ -29,8 +29,11 @@ Purpose: Stores property values
 INCLUDES
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%*/
 
+#include <assert.h>
+
 #include "FGPropertyValue.h"
-#include "input_output/FGPropertyManager.h"
+
+using namespace std;
 
 namespace JSBSim {
 
@@ -39,8 +42,8 @@ CLASS IMPLEMENTATION
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%*/
 
 FGPropertyValue::FGPropertyValue(const std::string& propName,
-                                 FGPropertyManager* propertyManager)
-  : PropertyManager(propertyManager), PropertyNode(nullptr),
+                                 std::shared_ptr<FGPropertyManager> propertyManager, Element* el)
+  : PropertyManager(propertyManager), PropertyNode(nullptr), XML_def(el),
     PropertyName(propName), Sign(1.0)
 {
   if (PropertyName[0] == '-') {
@@ -48,23 +51,31 @@ FGPropertyValue::FGPropertyValue(const std::string& propName,
     Sign = -1.0;
   }
 
-  if (PropertyManager->HasNode(PropertyName))
+  if (PropertyManager->HasNode(PropertyName)) {
     PropertyNode = PropertyManager->GetNode(PropertyName);
+
+    assert(PropertyNode);
+    XML_def = nullptr; // Now that the property is bound, we no longer need that.
+  }
 }
 
 //%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-FGPropertyNode* FGPropertyValue::GetNode(void) const
+SGPropertyNode* FGPropertyValue::GetNode(void) const
 {
-  if (!PropertyNode) {
-    FGPropertyNode* node = PropertyManager->GetNode(PropertyName);
-    
-    if (!node)
-      throw(std::string("FGPropertyValue::GetValue() The property " +
-                        PropertyName + " does not exist."));
+  if (PropertyNode) return PropertyNode;
 
-    PropertyNode = node;
+  // Manage late binding.
+  PropertyNode = PropertyManager->GetNode(PropertyName);
+  if (!PropertyNode) {
+    if (XML_def)
+      cerr << XML_def->ReadFrom()
+           << "Property " << PropertyName << " does not exist" << endl;
+    throw BaseException("FGPropertyValue::GetValue() The property " +
+                        PropertyName + " does not exist.");
   }
+
+  XML_def = nullptr; // Now that the property is bound, we no longer need that.
 
   return PropertyNode;
 }
@@ -80,6 +91,9 @@ double FGPropertyValue::GetValue(void) const
 
 void FGPropertyValue::SetValue(double value)
 {
+  // SetValue() ignores the Sign flag. So make sure it is never called with a
+  // negative sign.
+  assert(Sign == 1);
   GetNode()->setDoubleValue(value);
 }
 
@@ -88,7 +102,7 @@ void FGPropertyValue::SetValue(double value)
 std::string FGPropertyValue::GetName(void) const
 {
   if (PropertyNode)
-    return PropertyNode->GetName();
+    return PropertyNode->getNameString();
   else
     return PropertyName;
 }
@@ -111,7 +125,7 @@ std::string FGPropertyValue::GetNameWithSign(void) const
 std::string FGPropertyValue::GetFullyQualifiedName(void) const
 {
   if (PropertyNode)
-    return PropertyNode->GetFullyQualifiedName();
+    return JSBSim::GetFullyQualifiedName(PropertyNode);
   else
     return PropertyName;
 }
@@ -121,7 +135,7 @@ std::string FGPropertyValue::GetFullyQualifiedName(void) const
 std::string FGPropertyValue::GetPrintableName(void) const
 {
   if (PropertyNode)
-    return PropertyNode->GetPrintableName();
+    return JSBSim::GetPrintableName(PropertyNode);
   else
     return PropertyName;
 }

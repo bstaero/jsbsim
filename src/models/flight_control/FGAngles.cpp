@@ -39,7 +39,7 @@ COMMENTS, REFERENCES,  and NOTES
   from the current heading. The sense of the rotation to get to that angle is
   also calculated (positive 1 for a clockwise rotation, negative 1 for counter-
   clockwise).
-  
+
   The angle to the heading is calculated as follows:
 
   Given an angle phi:
@@ -68,7 +68,9 @@ INCLUDES
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%*/
 
 #include "FGAngles.h"
+#include "models/FGFCS.h"
 #include "input_output/FGXMLElement.h"
+#include "input_output/FGLog.h"
 
 using namespace std;
 
@@ -88,6 +90,8 @@ FGAngles::FGAngles(FGFCS* fcs, Element* element) : FGFCSComponent(fcs, element)
   target_angle_unit = 1.0;
   output_unit = 1.0;
 
+  auto PropertyManager = fcs->GetPropertyManager();
+
   if (element->FindElement("target_angle") ) {
     target_angle_pNode = PropertyManager->GetNode(element->FindElementValue("target_angle"));
     if (element->FindElement("target_angle")->HasAttribute("unit")) {
@@ -96,7 +100,9 @@ FGAngles::FGAngles(FGFCS* fcs, Element* element) : FGFCSComponent(fcs, element)
       }
     }
   } else {
-    throw("Target angle is required for component: "+Name);
+    XMLLogException err(fcs->GetExec()->GetLogger(), element);
+    err << "Target angle is required for Angles component: " << Name << "\n";
+    throw err;
   }
 
   if (element->FindElement("source_angle") ) {
@@ -107,19 +113,25 @@ FGAngles::FGAngles(FGFCS* fcs, Element* element) : FGFCSComponent(fcs, element)
       }
     }
   } else {
-    throw("Source latitude is required for Angles component: "+Name);
+    XMLLogException err(fcs->GetExec()->GetLogger(), element);
+    err << "Source angle is required for Angles component: " << Name << "\n";
+    throw err;
   }
 
   unit = element->GetAttributeValue("unit");
   if (!unit.empty()) {
     if      (unit == "DEG") output_unit = 180.0/M_PI;
     else if (unit == "RAD") output_unit = 1.0;
-    else throw("Unknown unit "+unit+" in angle component, "+Name);
+    else {
+      XMLLogException err(fcs->GetExec()->GetLogger(), element);
+      err << "Unknown unit " << unit << " in angle component, " << Name << "\n";
+      throw err;
+    }
   } else {
     output_unit = 1.0; // Default is radians (1.0) if unspecified
   }
 
-  bind(element);
+  bind(element, PropertyManager.get());
   Debug(0);
 }
 
@@ -164,7 +176,7 @@ bool FGAngles::Run(void )
 //       variable is not set, debug_lvl is set to 1 internally
 //    0: This requests JSBSim not to output any messages
 //       whatsoever.
-//    1: This value explicity requests the normal JSBSim
+//    1: This value explicitly requests the normal JSBSim
 //       startup messages
 //    2: This value asks for a message to be printed out when
 //       a class is instantiated
@@ -184,8 +196,9 @@ void FGAngles::Debug(int from)
     }
   }
   if (debug_lvl & 2 ) { // Instantiation/Destruction notification
-    if (from == 0) cout << "Instantiated: FGAngles" << endl;
-    if (from == 1) cout << "Destroyed:    FGAngles" << endl;
+    FGLogging log(fcs->GetExec()->GetLogger(), LogLevel::DEBUG);
+    if (from == 0) log << "Instantiated: FGAngles\n";
+    if (from == 1) log << "Destroyed:    FGAngles\n";
   }
   if (debug_lvl & 4 ) { // Run() method entry print for FGModel-derived objects
   }

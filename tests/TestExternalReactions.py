@@ -18,11 +18,16 @@
 # this program; if not, see <http://www.gnu.org/licenses/>
 #
 
-import os, math
 import numpy as np
 import xml.etree.ElementTree as et
 
 from JSBSim_utils import JSBSimTestCase, CreateFDM, RunTest, CopyAircraftDef
+
+def getParachuteArea(tree):
+    parachute_area = 1.0
+    for value in tree.getroot().findall('external_reactions/force/function/product/value'):
+        parachute_area *= float(value.text)
+    return parachute_area
 
 class TestExternalReactions(JSBSimTestCase):
     def getLeverArm(self, fdm, name):
@@ -53,10 +58,13 @@ class TestExternalReactions(JSBSimTestCase):
         self.assertAlmostEqual(fdm['external_reactions/parachute/y'], 0.0)
         self.assertAlmostEqual(fdm['external_reactions/parachute/z'], 0.0)
 
+        tree, _, _ = CopyAircraftDef(script_path, self.sandbox)
+        parachute_area = getParachuteArea(tree)
+
         while fdm.run():
             Tw2b = fdm.get_auxiliary().get_Tw2b()
-            mag = fdm['aero/qbar-psf'] * fdm['fcs/parachute_reef_pos_norm']*20.0
-            f = Tw2b * np.mat([-1.0, 0.0, 0.0]).T * mag
+            mag = fdm['aero/qbar-psf'] * fdm['fcs/parachute_reef_pos_norm']*parachute_area
+            f = Tw2b * np.matrix([-1.0, 0.0, 0.0]).T * mag
             self.assertAlmostEqual(fdm['forces/fbx-external-lbs'], f[0, 0])
             self.assertAlmostEqual(fdm['forces/fby-external-lbs'], f[1, 0])
             self.assertAlmostEqual(fdm['forces/fbz-external-lbs'], f[2, 0])
@@ -69,11 +77,8 @@ class TestExternalReactions(JSBSimTestCase):
 
     def test_body_frame(self):
         fdm = CreateFDM(self.sandbox)
-        aircraft_path = self.sandbox.path_to_jsbsim_file('aircraft')
         fdm.load_model('f16')
-
-        aircraft_path = os.path.join(aircraft_path, 'f16')
-        fdm.load_ic(os.path.join(aircraft_path, 'reset00.xml'), False)
+        fdm.load_ic('reset00.xml', True)
         fdm.run_ic()
 
         self.assertAlmostEqual(fdm['external_reactions/pushback/location-x-in'],
@@ -98,7 +103,7 @@ class TestExternalReactions(JSBSimTestCase):
         dz = 0.01
         fhook = np.array([dx, 0.0, dz])
         fhook /= np.linalg.norm(fhook)
-        
+
         self.assertAlmostEqual(fdm['external_reactions/hook/x'], fhook[0])
         self.assertAlmostEqual(fdm['external_reactions/hook/y'], fhook[1])
         self.assertAlmostEqual(fdm['external_reactions/hook/z'], fhook[2])
@@ -203,8 +208,7 @@ class TestExternalReactions(JSBSimTestCase):
     def test_moment(self):
         script_path = self.sandbox.path_to_jsbsim_file('scripts',
                                                        'ball_chute.xml')
-        tree, aircraft_name, aircraft_path = CopyAircraftDef(script_path,
-                                                             self.sandbox)
+        tree, aircraft_name, _ = CopyAircraftDef(script_path, self.sandbox)
         extReact_element = tree.getroot().find('external_reactions')
         moment_element = et.SubElement(extReact_element, 'moment')
         moment_element.attrib['name'] = 'parachute'
@@ -232,16 +236,17 @@ class TestExternalReactions(JSBSimTestCase):
         self.assertAlmostEqual(fdm['external_reactions/parachute/n'], mDir[2])
 
         fdm['external_reactions/parachute/magnitude-lbsft'] = -3.5
+        parachute_area = getParachuteArea(tree)
 
         while fdm.run():
             Tw2b = fdm.get_auxiliary().get_Tw2b()
-            mag = fdm['aero/qbar-psf'] * fdm['fcs/parachute_reef_pos_norm']*20.0
-            f = Tw2b * np.mat([-1.0, 0.0, 0.0]).T * mag
+            mag = fdm['aero/qbar-psf'] * fdm['fcs/parachute_reef_pos_norm']*parachute_area
+            f = Tw2b * np.matrix([-1.0, 0.0, 0.0]).T * mag
             self.assertAlmostEqual(fdm['forces/fbx-external-lbs'], f[0, 0])
             self.assertAlmostEqual(fdm['forces/fby-external-lbs'], f[1, 0])
             self.assertAlmostEqual(fdm['forces/fbz-external-lbs'], f[2, 0])
 
-            m = -3.5 * Tw2b * np.mat(mDir).T
+            m = -3.5 * Tw2b * np.matrix(mDir).T
             fm = np.cross(self.getLeverArm(fdm,'parachute'),
                           np.array([f[0,0], f[1,0], f[2, 0]]))
             self.assertAlmostEqual(fdm['moments/l-external-lbsft'], m[0, 0] + fm[0])

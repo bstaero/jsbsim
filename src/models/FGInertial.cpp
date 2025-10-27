@@ -35,7 +35,11 @@ HISTORY
 INCLUDES
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%*/
 
+#include "FGFDMExec.h"
 #include "FGInertial.h"
+#include "input_output/FGXMLElement.h"
+#include "input_output/FGLog.h"
+#include "GeographicLib/Geodesic.hpp"
 
 using namespace std;
 
@@ -47,18 +51,15 @@ CLASS IMPLEMENTATION
 
 
 FGInertial::FGInertial(FGFDMExec* fgex)
-  : FGModel(fgex), RadiusReference(20925646.32546)
+  : FGModel(fgex)
 {
-  Name = "FGInertial";
+  Name = "Earth";
 
   // Earth defaults
   double RotationRate    = 0.00007292115;
-//  RotationRate    = 0.000072921151467;
   GM              = 14.0764417572E15;   // WGS84 value
-  C2_0            = -4.84165371736E-04; // WGS84 value for the C2,0 coefficient
   J2              = 1.08262982E-03;     // WGS84 value for J2
   a               = 20925646.32546;     // WGS84 semimajor axis length in feet
-//  a               = 20902254.5305;      // Effective Earth radius for a sphere
   b               = 20855486.5951;      // WGS84 semiminor axis length in feet
   gravType = gtWGS84;
 
@@ -66,15 +67,13 @@ FGInertial::FGInertial(FGFDMExec* fgex)
   /*
   double RotationRate    = 0.0000026617;
   GM              = 1.7314079E14;         // Lunar GM
-  RadiusReference = 5702559.05;           // Equatorial radius
-  C2_0            = 0;                    // value for the C2,0 coefficient
   J2              = 2.033542482111609E-4; // value for J2
   a               = 5702559.05;           // semimajor axis length in feet
   b               = 5695439.63;           // semiminor axis length in feet
   */
 
   vOmegaPlanet = { 0.0, 0.0, RotationRate };
-  GroundCallback.reset(new FGDefaultGroundCallback(RadiusReference, RadiusReference));
+  GroundCallback = std::make_unique<FGDefaultGroundCallback>(a, b);
 
   bind();
 
@@ -86,6 +85,52 @@ FGInertial::FGInertial(FGFDMExec* fgex)
 FGInertial::~FGInertial(void)
 {
   Debug(1);
+}
+
+//%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+bool FGInertial::Load(Element* el)
+{
+  if (!Upload(el, true)) return false;
+
+  Name = el->GetAttributeValue("name");
+
+  if (el->FindElement("semimajor_axis"))
+    a = el->FindElementValueAsNumberConvertTo("semimajor_axis", "FT");
+  else if (el->FindElement("equatorial_radius"))
+    a = el->FindElementValueAsNumberConvertTo("equatorial_radius", "FT");
+  if (el->FindElement("semiminor_axis"))
+    b = el->FindElementValueAsNumberConvertTo("semiminor_axis", "FT");
+  else if (el->FindElement("polar_radius"))
+    b = el->FindElementValueAsNumberConvertTo("polar_radius", "FT");
+  // Trigger GeographicLib exceptions if the equatorial or polar radii are
+  // ill-defined.
+  // This intercepts the exception before being thrown by a destructor.
+  GeographicLib::Geodesic geod(a, 1.-b/a);
+
+  if (el->FindElement("rotation_rate")) {
+    double RotationRate = el->FindElementValueAsNumberConvertTo("rotation_rate", "RAD/SEC");
+    vOmegaPlanet = {0., 0., RotationRate};
+  }
+  if (el->FindElement("GM"))
+    GM = el->FindElementValueAsNumberConvertTo("GM", "FT3/SEC2");
+  if (el->FindElement("J2"))
+    J2 = el->FindElementValueAsNumber("J2"); // Dimensionless
+
+  GroundCallback->SetEllipse(a, b);
+
+  // Messages to warn the user about possible inconsistencies.
+  if (debug_lvl > 0) {
+    FGLogging log(FDMExec->GetLogger(), LogLevel::WARN);
+    if (a != b && J2 == 0.0)
+      log << "Gravitational constant J2 is null for a non-spherical planet." << endl;
+    if (a == b && J2 != 0.0)
+      log << "Gravitational constant J2 is non-zero for a spherical planet." << endl;
+  }
+
+  Debug(2);
+
+  return true;
 }
 
 //%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -114,6 +159,36 @@ bool FGInertial::Run(bool Holding)
 
 //%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+FGMatrix33 FGInertial::GetTl2ec(const FGLocation& location) const
+{
+  FGColumnVector3 North, Down, East{-location(eY), location(eX), 0.};
+
+  switch (gravType) {
+  case gtStandard:
+    {
+      Down = location;
+      Down *= -1.0;
+    }
+    break;
+  case gtWGS84:
+    {
+      FGLocation sea_level = location;
+      sea_level.SetPositionGeodetic(location.GetLongitude(),
+                                    location.GetGeodLatitudeRad(), 0.0);
+      Down = GetGravityJ2(location);
+      Down -= vOmegaPlanet*(vOmegaPlanet*sea_level);}
+    }
+  Down.Normalize();
+  East.Normalize();
+  North = East*Down;
+
+  return FGMatrix33{North(eX), East(eX), Down(eX),
+                    North(eY), East(eY), Down(eY),
+                    North(eZ), 0.0,      Down(eZ)};
+}
+
+//%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
 double FGInertial::GetGAccel(double r) const
 {
   return GM/(r*r);
@@ -132,7 +207,7 @@ FGColumnVector3 FGInertial::GetGravityJ2(const FGLocation& position) const
 
   // Gravitation accel
   double r = position.GetRadius();
-  double sinLat = position.GetSinLatitude();
+  double sinLat = sin(position.GetLatitude());
 
   double adivr = a/r;
   double preCommon = 1.5*J2*adivr*adivr;
@@ -151,8 +226,9 @@ FGColumnVector3 FGInertial::GetGravityJ2(const FGLocation& position) const
 
 void FGInertial::SetAltitudeAGL(FGLocation& location, double altitudeAGL)
 {
-  FGLocation contact;
   FGColumnVector3 vDummy;
+  FGLocation contact;
+  contact.SetEllipse(a, b);
   GroundCallback->GetAGLevel(location, contact, vDummy, vDummy, vDummy);
   double groundHeight = contact.GetGeodAltitude();
   double longitude = location.GetLongitude();
@@ -163,11 +239,32 @@ void FGInertial::SetAltitudeAGL(FGLocation& location, double altitudeAGL)
 
 //%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+void FGInertial::SetGravityType(int gt)
+{
+  // Messages to warn the user about possible inconsistencies.
+  FGLogging log(FDMExec->GetLogger(), LogLevel::WARN);
+  switch (gt)
+  {
+  case eGravType::gtStandard:
+    if (a != b)
+      log << "Standard gravity model has been set for a non-spherical planet" << endl;
+    break;
+  case eGravType::gtWGS84:
+    if (J2 == 0.0)
+      log << "WGS84 gravity model has been set without specifying the J2 gravitational constant." << endl;
+  }
+
+  gravType = gt;
+}
+
+//%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
 void FGInertial::bind(void)
 {
   PropertyManager->Tie("inertial/sea-level-radius_ft", &in.Position,
                        &FGLocation::GetSeaLevelRadius);
-  PropertyManager->Tie("simulation/gravity-model", &gravType);
+  PropertyManager->Tie("simulation/gravity-model", this, &FGInertial::GetGravityType,
+                       &FGInertial::SetGravityType);
 }
 
 //%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -194,13 +291,21 @@ void FGInertial::Debug(int from)
   if (debug_lvl <= 0) return;
 
   if (debug_lvl & 1) { // Standard console startup message output
-    if (from == 0) { // Constructor
-
+    FGLogging log(FDMExec->GetLogger(), LogLevel::DEBUG);
+    if (from == 0) {} // Constructor
+    if (from == 2) { // Loading
+      log << endl << "  Planet " << Name << endl
+          << "    Semi major axis: " << a << endl
+          << "    Semi minor axis: " << b << endl
+          << "    Rotation rate  : " << scientific << vOmegaPlanet(eZ) << endl
+          << "    GM             : " << GM << endl
+          << "    J2             : " << J2 << endl << defaultfloat << endl;
     }
   }
   if (debug_lvl & 2 ) { // Instantiation/Destruction notification
-    if (from == 0) cout << "Instantiated: FGInertial" << endl;
-    if (from == 1) cout << "Destroyed:    FGInertial" << endl;
+    FGLogging log(FDMExec->GetLogger(), LogLevel::DEBUG);
+    if (from == 0) log << "Instantiated: FGInertial" << endl;
+    if (from == 1) log << "Destroyed:    FGInertial" << endl;
   }
   if (debug_lvl & 4 ) { // Run() method entry print for FGModel-derived objects
   }

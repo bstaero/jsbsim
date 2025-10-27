@@ -40,8 +40,10 @@ INCLUDES
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%*/
 
 #include "initialization/FGTrim.h"
+#include "initialization/FGInitialCondition.h"
 #include "FGFDMExec.h"
 #include "input_output/FGXMLFileRead.h"
+#include "input_output/string_utilities.h"
 
 #if !defined(__GNUC__) && !defined(sgi) && !defined(_MSC_VER)
 #  include <time>
@@ -67,6 +69,11 @@ INCLUDES
 #  include <sys/time.h>
 #endif
 
+// The flag ENABLE_VIRTUAL_TERMINAL_PROCESSING is not defined for MinGW < 7.0.0
+#if defined(__MINGW64_VERSION_MAJOR) && __MINGW64_VERSION_MAJOR < 7
+#define ENABLE_VIRTUAL_TERMINAL_PROCESSING 0x4
+#endif
+
 #include <iostream>
 #include <cstdlib>
 
@@ -82,6 +89,7 @@ SGPath RootDir;
 SGPath ScriptName;
 string AircraftName;
 SGPath ResetName;
+SGPath PlanetName;
 vector <string> LogOutputName;
 vector <SGPath> LogDirectiveName;
 vector <string> CommandLineProperties;
@@ -174,6 +182,44 @@ public:
     ResetParser();
     return result;
   }
+};
+
+/** The Timer class measures the elapsed real time and can be paused and resumed.
+    It inherits from SGPropertyChangeListener to restart the timer whenever a
+    property change is detected. */
+class Timer : public SGPropertyChangeListener {
+public:
+  Timer() : SGPropertyChangeListener(), isPaused(false) { start(); }
+  void start(void) { initial_seconds = getcurrentseconds(); }
+
+  /// Restart the timer when the listened property is modified.
+  void valueChanged(SGPropertyNode* prop) override {
+    start();
+    if (isPaused) pause_start_seconds = initial_seconds;
+  }
+  /// Get the elapsed real time in seconds since the timer was started.
+  double getElapsedTime(void) { return getcurrentseconds() - initial_seconds; }
+
+  /** Pause the timer if the `paused` parameter is true and resume it if the
+      `paused` parameter is false. */
+  void pause(bool paused) {
+    if (paused) {
+      if (!isPaused) {
+        isPaused = true;
+        pause_start_seconds = getcurrentseconds();
+      }
+    } else {
+      if (isPaused) {
+        isPaused = false;
+        double pause_duration = getcurrentseconds() - pause_start_seconds;
+        initial_seconds += pause_duration; // Shift the initial time to account for the pause duration.
+      }
+    }
+  }
+private:
+  double initial_seconds = 0.0;
+  bool isPaused = false;
+  double pause_start_seconds = 0.0;
 };
 
 /*%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -285,7 +331,7 @@ int main(int argc, char* argv[])
   _controlfp(_controlfp(0, 0) & ~(_EM_INVALID | _EM_ZERODIVIDE | _EM_OVERFLOW),
            _MCW_EM);
 #elif defined(__GNUC__) && !defined(sgi) && !defined(__APPLE__)
-  feenableexcept(FE_DIVBYZERO | FE_INVALID);
+  feenableexcept(FE_DIVBYZERO | FE_INVALID | FE_OVERFLOW);
 #endif
 
   try {
@@ -297,6 +343,10 @@ int main(int argc, char* argv[])
   } catch (const char* msg) {
     std::cerr << "FATAL ERROR: JSBSim terminated with an exception."
               << std::endl << "The message was: " << msg << std::endl;
+    return 1;
+  } catch (const JSBSim::BaseException& e) {
+    std::cerr << "FATAL ERROR: JSBSim terminated with an exception."
+              << std::endl << "The message was: " << e.what() << std::endl;
     return 1;
   } catch (...) {
     std::cerr << "FATAL ERROR: JSBSim terminated with an unknown exception."
@@ -313,19 +363,14 @@ int real_main(int argc, char* argv[])
   ScriptName = "";
   AircraftName = "";
   ResetName = "";
+  PlanetName = "";
   LogOutputName.clear();
   LogDirectiveName.clear();
   bool result = false, success;
-  bool was_paused = false;
-  
   double frame_duration;
 
   double new_five_second_value = 0.0;
   double actual_elapsed_time = 0;
-  double initial_seconds = 0;
-  double current_seconds = 0.0;
-  double paused_seconds = 0.0;
-  double sim_lag_time = 0;
   double cycle_duration = 0.0;
   double override_sim_rate_value = 0.0;
   long sleep_nseconds = 0;
@@ -349,8 +394,24 @@ int real_main(int argc, char* argv[])
   FDMExec->SetAircraftPath(SGPath("aircraft"));
   FDMExec->SetEnginePath(SGPath("engine"));
   FDMExec->SetSystemsPath(SGPath("systems"));
+  FDMExec->SetOutputPath(SGPath("."));
   FDMExec->GetPropertyManager()->Tie("simulation/frame_start_time", &actual_elapsed_time);
   FDMExec->GetPropertyManager()->Tie("simulation/cycle_duration", &cycle_duration);
+
+  Timer timer;
+  SGPropertyNode_ptr reset_node = FDMExec->GetPropertyManager()->GetNode("simulation/reset");
+  reset_node->addChangeListener(&timer);
+
+  // Check whether to disable console highlighting output on Windows.
+  // Support was added to Windows for Virtual Terminal codes by a particular
+  // Windows 10 release.
+#ifdef _WIN32
+  HANDLE hStdOut = GetStdHandle(STD_OUTPUT_HANDLE);
+  DWORD dwMode = 0;
+  GetConsoleMode(hStdOut, &dwMode);
+  if ((dwMode & ENABLE_VIRTUAL_TERMINAL_PROCESSING) == 0)
+    nohighlight = true;
+#endif
 
   if (nohighlight) FDMExec->disableHighLighting();
 
@@ -369,6 +430,16 @@ int real_main(int argc, char* argv[])
       if (FDMExec->GetPropertyManager()->GetNode(CommandLineProperties[i])) {
         FDMExec->SetPropertyValue(CommandLineProperties[i], CommandLinePropertyValues[i]);
       }
+    }
+  }
+
+  if (!PlanetName.isNull()) {
+    result = FDMExec->LoadPlanet(PlanetName, false);
+
+    if (!result) {
+      cerr << "Planet file " << PlanetName << " was not successfully loaded" << endl;
+      delete FDMExec;
+      exit(-1);
     }
   }
 
@@ -403,7 +474,7 @@ int real_main(int argc, char* argv[])
       return 0;
     }
 
-    JSBSim::FGInitialCondition *IC = FDMExec->GetIC();
+    auto IC = FDMExec->GetIC();
     if ( ! IC->Load(ResetName)) {
       delete FDMExec;
       cerr << "Initialization unsuccessful" << endl;
@@ -462,7 +533,7 @@ int real_main(int argc, char* argv[])
 
   // Dump the simulation state (position, orientation, etc.)
   FDMExec->GetPropagate()->DumpState();
-  
+
   // Perform trim if requested via the initialization file
   JSBSim::TrimMode icTrimRequested = (JSBSim::TrimMode)FDMExec->GetIC()->TrimRequested();
   if (icTrimRequested != JSBSim::TrimMode::tNone) {
@@ -479,7 +550,7 @@ int real_main(int argc, char* argv[])
       exit(1);
     }
   }
-  
+
   cout << endl << JSBSim::FGFDMExec::fggreen << JSBSim::FGFDMExec::highint
        << "---- JSBSim Execution beginning ... --------------------------------------------"
        << JSBSim::FGFDMExec::reset << endl << endl;
@@ -492,25 +563,28 @@ int real_main(int argc, char* argv[])
   char s[100];
   time_t tod;
   time(&tod);
-  strftime(s, 99, "%A %B %d %Y %X", localtime(&tod));
+  struct tm local;
+#if defined(_MSC_VER) || defined(__MINGW32__)
+  localtime_s(&local, &tod);
+#else
+  localtime_r(&tod, &local);
+#endif
+  strftime(s, 99, "%A %B %d %Y %X", &local);
   cout << "Start: " << s << " (HH:MM:SS)" << endl;
 
   frame_duration = FDMExec->GetDeltaT();
   if (realtime) sleep_nseconds = (long)(frame_duration*1e9);
   else          sleep_nseconds = (sleep_period )*1e9;           // 0.01 seconds
 
-  tzset(); 
-  current_seconds = initial_seconds = getcurrentseconds();
+  tzset();
+  timer.start();
 
   // *** CYCLIC EXECUTION LOOP, AND MESSAGE READING *** //
   while (result && FDMExec->GetSimTime() <= end_time) {
-
-    FDMExec->ProcessMessage(); // Process messages, if any.
-    
     // Check if increment then hold is on and take appropriate actions if it is
     // Iterate is not supported in realtime - only in batch and playnice modes
     FDMExec->CheckIncrementalHold();
-    
+
     // if running realtime, throttle the execution, else just run flat-out fast
     // unless "playing nice", in which case sleep for a while (0.01 seconds) each frame.
     // If suspended, then don't increment cumulative realtime "stopwatch".
@@ -523,20 +597,16 @@ int real_main(int argc, char* argv[])
         if (play_nice) sim_nsleep(sleep_nseconds);
 
       } else {                    // ------------ RUNNING IN REALTIME MODE
+        timer.pause(false);
+        actual_elapsed_time = timer.getElapsedTime();
 
-        // "was_paused" will be true if entering this "run" loop from a paused state.
-        if (was_paused) {
-          initial_seconds += paused_seconds;
-          was_paused = false;
-        }
-        current_seconds = getcurrentseconds();                      // Seconds since 1 Jan 1970
-        actual_elapsed_time = current_seconds - initial_seconds;    // Real world elapsed seconds since start
-        sim_lag_time = actual_elapsed_time - FDMExec->GetSimTime(); // How far behind sim-time is from actual
-                                                                    // elapsed time.
+        double sim_lag_time = actual_elapsed_time - FDMExec->GetSimTime(); // How far behind sim-time is from actual elapsed time.
+        double cycle_start = getcurrentseconds();
+
         for (int i=0; i<(int)(sim_lag_time/frame_duration); i++) {  // catch up sim time to actual elapsed time.
           result = FDMExec->Run();
-          cycle_duration = getcurrentseconds() - current_seconds;   // Calculate cycle duration
-          current_seconds = getcurrentseconds();                    // Get new current_seconds
+          cycle_duration = getcurrentseconds() - cycle_start;   // Calculate cycle duration
+          cycle_start = getcurrentseconds();                    // Get new current_seconds
           if (FDMExec->Holding()) break;
         }
 
@@ -548,8 +618,7 @@ int real_main(int argc, char* argv[])
         }
       }
     } else { // Suspended
-      was_paused = true;
-      paused_seconds = getcurrentseconds() - current_seconds;
+      timer.pause(true);
       sim_nsleep(sleep_nseconds);
       result = FDMExec->Run();
     }
@@ -558,7 +627,12 @@ int real_main(int argc, char* argv[])
 
   // PRINT ENDING CLOCK TIME
   time(&tod);
-  strftime(s, 99, "%A %B %d %Y %X", localtime(&tod));
+#if defined(_MSC_VER) || defined(__MINGW32__)
+  localtime_s(&local, &tod);
+#else
+  localtime_r(&tod, &local);
+#endif
+  strftime(s, 99, "%A %B %d %Y %X", &local);
   cout << "End: " << s << " (HH:MM:SS)" << endl;
 
   // CLEAN UP
@@ -608,7 +682,7 @@ bool options(int count, char **arg)
       play_nice = true;
       if (n != string::npos) {
         try {
-          sleep_period = atof( value.c_str() );
+          sleep_period = JSBSim::atof_locale_c( value.c_str() );
         } catch (...) {
           cerr << endl << "  Invalid sleep period given!" << endl << endl;
           result = false;
@@ -659,14 +733,26 @@ bool options(int count, char **arg)
         gripe;
         exit(1);
       }
-
+    } else if (keyword == "--planet") {
+      if (n != string::npos) {
+        PlanetName = SGPath::fromLocal8Bit(value.c_str());
+      } else {
+        gripe;
+        exit(1);
+      }
     } else if (keyword == "--property") {
       if (n != string::npos) {
-         string propName = value.substr(0,value.find("="));
-         string propValueString = value.substr(value.find("=")+1);
-         double propValue = atof(propValueString.c_str());
-         CommandLineProperties.push_back(propName);
-         CommandLinePropertyValues.push_back(propValue);
+        string propName = value.substr(0,value.find("="));
+        string propValueString = value.substr(value.find("=")+1);
+        double propValue;
+        try {
+          propValue = JSBSim::atof_locale_c(propValueString.c_str());
+        } catch (JSBSim::InvalidNumber&) {
+          gripe;
+          exit(1);
+        }
+        CommandLineProperties.push_back(propName);
+        CommandLinePropertyValues.push_back(propValue);
       } else {
         gripe;
         exit(1);
@@ -675,7 +761,7 @@ bool options(int count, char **arg)
     } else if (keyword.substr(0,5) == "--end") {
       if (n != string::npos) {
         try {
-        end_time = atof( value.c_str() );
+          end_time = JSBSim::atof_locale_c( value.c_str() );
         } catch (...) {
           cerr << endl << "  Invalid end time given!" << endl << endl;
           result = false;
@@ -688,7 +774,7 @@ bool options(int count, char **arg)
     } else if (keyword == "--simulation-rate") {
       if (n != string::npos) {
         try {
-          simulation_rate = atof( value.c_str() );
+          simulation_rate = JSBSim::atof_locale_c( value.c_str() );
           override_sim_rate = true;
         } catch (...) {
           cerr << endl << "  Invalid simulation rate given!" << endl << endl;
@@ -701,13 +787,13 @@ bool options(int count, char **arg)
 
     } else if (keyword == "--catalog") {
         catalog = true;
-        if (value.size() > 0) AircraftName=value;
+        if (!value.empty()) AircraftName=value;
     } else if (keyword.substr(0,2) != "--" && value.empty() ) {
       // See what kind of files we are specifying on the command line
 
       XMLFile xmlFile;
       SGPath path = SGPath::fromLocal8Bit(keyword.c_str());
-      
+
       if (xmlFile.IsScriptFile(path)) ScriptName = path;
       else if (xmlFile.IsLogDirectiveFile(path))  LogDirectiveName.push_back(path);
       else if (xmlFile.IsAircraftFile(SGPath("aircraft")/keyword/keyword)) AircraftName = keyword;
@@ -766,7 +852,8 @@ void PrintHelp(void)
     cout << "    --nice  specifies to run at lower CPU usage" << endl;
     cout << "    --nohighlight  specifies that console output should be pure text only (no color)" << endl;
     cout << "    --suspend  specifies to suspend the simulation after initialization" << endl;
-    cout << "    --initfile=<filename>  specifies an initilization file" << endl;
+    cout << "    --initfile=<filename>  specifies an initialization file" << endl;
+    cout << "    --planet=<filename>  specifies a planet definition file" << endl;
     cout << "    --catalog specifies that all properties for this aircraft model should be printed" << endl;
     cout << "              (catalog=aircraftname is an optional format)" << endl;
     cout << "    --property=<name=value> e.g. --property=simulation/integrator/rate/rotational=1" << endl;

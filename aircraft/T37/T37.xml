@@ -34,7 +34,7 @@
 
     <fileheader>
         <author> Erik Hofman </author>
-        <filecreationdate> 2001-01-01 </filecreationdate>
+        <filecreationdate>2001-01-01</filecreationdate>
         <version> $Revision: 1.27 $ </version>
         <description> T-37 trainer </description>
       <note>
@@ -137,16 +137,6 @@
     </ground_reactions>
     <propulsion>
         <engine file="J69-T25">
-            <location unit="IN">
-                <x> 40 </x>
-                <y> -30 </y>
-                <z> 0 </z>
-            </location>
-            <orient unit="DEG">
-                <roll> 0.0 </roll>
-                <pitch> 0 </pitch>
-                <yaw> 0 </yaw>
-            </orient>
             <feed>0</feed>
             <thruster file="direct">
                 <location unit="IN">
@@ -162,16 +152,6 @@
             </thruster>
         </engine>
         <engine file="J69-T25">
-            <location unit="IN">
-                <x> 40 </x>
-                <y> 30 </y>
-                <z> 0 </z>
-            </location>
-            <orient unit="DEG">
-                <roll> 0.0 </roll>
-                <pitch> 0 </pitch>
-                <yaw> 0 </yaw>
-            </orient>
             <feed>1</feed>
             <thruster file="direct">
                 <location unit="IN">
@@ -471,7 +451,7 @@
                 <product>
                     <property>aero/qbar-psf</property>
                     <property>metrics/Sw-sqft</property>
-                    <abs><property>fcs/elevator-pos-norm</property></abs>
+                    <property>fcs/mag-elevator-pos-rad</property>
                     <value>0.0750</value>
                 </product>
             </function>

@@ -38,7 +38,9 @@ INCLUDES
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%*/
 
 #include "FGFilter.h"
+#include "models/FGFCS.h"
 #include "math/FGParameterValue.h"
+#include "input_output/FGLog.h"
 
 using namespace std;
 
@@ -52,8 +54,12 @@ FGFilter::FGFilter(FGFCS* fcs, Element* element)
   : FGFCSComponent(fcs, element), DynamicFilter(false), Initialize(true)
 {
   C[1] = C[2] = C[3] = C[4] = C[5] = C[6] = nullptr;
+
+  CheckInputNodes(1, 1, element);
+
+  auto PropertyManager = fcs->GetPropertyManager();
   for (int i=1; i<7; i++)
-    ReadFilterCoefficients(element, i);
+    ReadFilterCoefficients(element, i, PropertyManager);
 
   if      (Type == "LAG_FILTER")          FilterType = eLag        ;
   else if (Type == "LEAD_LAG_FILTER")     FilterType = eLeadLag    ;
@@ -63,7 +69,7 @@ FGFilter::FGFilter(FGFCS* fcs, Element* element)
 
   CalculateDynamicFilters();
 
-  bind(element);
+  bind(element, PropertyManager.get());
 
   Debug(0);
 }
@@ -86,13 +92,14 @@ void FGFilter::ResetPastStates(void)
 
 //%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-void FGFilter::ReadFilterCoefficients(Element* element, int index)
+void FGFilter::ReadFilterCoefficients(Element* element, int index,
+                                      std::shared_ptr<FGPropertyManager> PropertyManager)
 {
-  // index is known to be 1-7. 
+  // index is known to be 1-7.
   // A stringstream would be overkill, but also trying to avoid sprintf
   string coefficient = "c0";
   coefficient[1] += index;
-  
+
   if ( element->FindElement(coefficient) ) {
     C[index] = new FGParameterValue(element->FindElement(coefficient),
                                     PropertyManager);
@@ -133,7 +140,10 @@ void FGFilter::CalculateDynamicFilters(void)
       cb = (2.0 - dt*C[1]) / denom;
       break;
     case eUnknown:
-      cerr << "Unknown filter type" << endl;
+    {
+      FGLogging log(fcs->GetExec()->GetLogger(), LogLevel::ERROR);
+      log << "Unknown filter type\n";
+    }
     break;
   }
 
@@ -151,9 +161,9 @@ bool FGFilter::Run(void)
   } else {
 
     Input = InputNodes[0]->getDoubleValue();
-    
+
     if (DynamicFilter) CalculateDynamicFilters();
-    
+
     switch (FilterType) {
       case eLag:
         Output = (Input + PreviousInput1) * ca + PreviousOutput1 * cb;
@@ -193,7 +203,7 @@ bool FGFilter::Run(void)
 //       variable is not set, debug_lvl is set to 1 internally
 //    0: This requests JSBSim not to output any messages
 //       whatsoever.
-//    1: This value explicity requests the normal JSBSim
+//    1: This value explicitly requests the normal JSBSim
 //       startup messages
 //    2: This value asks for a message to be printed out when
 //       a class is instantiated
@@ -210,23 +220,25 @@ void FGFilter::Debug(int from)
 
   if (debug_lvl & 1) { // Standard console startup message output
     if (from == 0) { // Constructor
-      cout << "      INPUT: " << InputNodes[0]->GetName() << endl;
+      FGLogging log(fcs->GetExec()->GetLogger(), LogLevel::DEBUG);
+      log << "      INPUT: " << InputNodes[0]->GetName() << fixed << "\n";
 
-      for (int i=1; i <= 7; i++) {
+      for (int i=1; i < 7; i++) {
         if (!C[i]) break;
 
-        cout << "      C[" << i << "]";
-        if (!C[i]->IsConstant()) cout << " is the value of property";
-        cout << ": "<< C[i]->GetName() << endl;
+        log << "      C[" << i << "]";
+        if (!C[i]->IsConstant()) log << " is the value of property";
+        log << ": "<< C[i]->GetName() << "\n";
       }
 
       for (auto node: OutputNodes)
-        cout << "      OUTPUT: " << node->getName() << endl;
+        log << "      OUTPUT: " << node->getNameString() << "\n";
     }
   }
   if (debug_lvl & 2 ) { // Instantiation/Destruction notification
-    if (from == 0) cout << "Instantiated: FGFilter" << endl;
-    if (from == 1) cout << "Destroyed:    FGFilter" << endl;
+    FGLogging log(fcs->GetExec()->GetLogger(), LogLevel::DEBUG);
+    if (from == 0) log << "Instantiated: FGFilter\n";
+    if (from == 1) log << "Destroyed:    FGFilter\n";
   }
   if (debug_lvl & 4 ) { // Run() method entry print for FGModel-derived objects
   }

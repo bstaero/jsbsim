@@ -2,7 +2,11 @@
 #include <memory>
 #include <cxxtest/TestSuite.h>
 
+#include <FGFDMExec.h>
+#include <initialization/FGInitialCondition.h>
 #include <math/FGLocation.h>
+#include <models/FGInertial.h>
+#include <models/FGPropagate.h>
 #include <input_output/FGGroundCallback.h>
 #include "TestAssertions.h"
 
@@ -12,6 +16,27 @@ const double a = 20925646.32546; // WGS84 semimajor axis length in feet
 const double b = 20855486.5951;  // WGS84 semiminor axis length in feet
 
 using namespace JSBSim;
+
+// A class that does not set the ellipse parameters of the 'contact' location
+// to check that such a ground callback does not crash JSBSim.
+class DummyGroundCallback : public FGDefaultGroundCallback
+{
+public:
+  DummyGroundCallback(double a, double b) : FGDefaultGroundCallback(a, b) {}
+  double GetAGLevel(double t, const FGLocation& location,
+                    FGLocation& contact,
+                    FGColumnVector3& normal, FGColumnVector3& v,
+                    FGColumnVector3& w) const override
+  {
+    FGLocation c;
+    double h = FGDefaultGroundCallback::GetAGLevel(t, location, c, normal, v, w);
+    // The ellipse parameters are intentionally not copied from c to contact.
+    contact(1) = c(1);
+    contact(2) = c(2);
+    contact(3) = c(3);
+    return h;
+  }
+};
 
 class FGGroundCallbackTest : public CxxTest::TestSuite
 {
@@ -68,7 +93,11 @@ public:
         TS_ASSERT_VECTOR_EQUALS(w, zero);
         FGColumnVector3 vLoc = loc;
         FGColumnVector3 vContact = contact;
+#ifdef __arm64__
+        TS_ASSERT_DELTA(vContact.Magnitude()/RadiusReference, 1.0, epsilon);
+#else
         TS_ASSERT_DELTA(vContact.Magnitude(), RadiusReference, epsilon);
+#endif
         FGColumnVector3 vtest = vLoc/(1.+h/RadiusReference);
         TS_ASSERT_DELTA(vtest(1), vContact(1), 1e-8);
         TS_ASSERT_DELTA(vtest(2), vContact(2), 1e-8);
@@ -213,5 +242,26 @@ public:
         TS_ASSERT_DELTA(vLoc(3), vContact(3), 1e-7);
       }
     }
+  }
+
+  // Regression test for FlightGear.
+  //
+  // Check that JSBSim does not crash (assertion "ellipse not set") when using
+  // a ground callback that does not set the ellipse parameters of the 'contact'
+  // location in its GetAGLevel method.
+  void testGroundCallback() {
+    FGFDMExec fdmex;
+    auto propagate = fdmex.GetPropagate();
+    auto planet = fdmex.GetInertial();
+    DummyGroundCallback* cb = new DummyGroundCallback(planet->GetSemimajor(),
+                                                      planet->GetSemiminor());
+    planet->SetGroundCallback(cb);
+    auto IC = fdmex.GetIC();
+    TS_ASSERT_DELTA(IC->GetTerrainElevationFtIC(), 0.0, 1E-8);
+    TS_ASSERT_DELTA(propagate->GetTerrainElevation(), 0.0, 1E-8);
+    FGLocation loc;
+    loc.SetEllipse(planet->GetSemimajor(), planet->GetSemiminor());
+    planet->SetAltitudeAGL(loc, 1.0);
+    TS_ASSERT_DELTA(loc.GetGeodAltitude(), 1.0, 1E-8);
   }
 };

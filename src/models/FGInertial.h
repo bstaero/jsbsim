@@ -62,7 +62,7 @@ CLASS DOCUMENTATION
 CLASS DECLARATION
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%*/
 
-class FGInertial : public FGModel {
+class JSBSIM_API FGInertial : public FGModel {
 
 public:
   explicit FGInertial(FGFDMExec*);
@@ -83,9 +83,9 @@ public:
   void SetOmegaPlanet(double rate) {
     vOmegaPlanet = FGColumnVector3(0.0, 0.0, rate);
   }
-  double GetRefRadius(void) const {return RadiusReference;}
   double GetSemimajor(void) const {return a;}
   double GetSemiminor(void) const {return b;}
+  double GetGM(void) const {return GM;}
 
   /** @name Functions that rely on the ground callback
       The following functions allow to set and get the vehicle position above
@@ -133,7 +133,7 @@ public:
   }
 
   /** Set the simulation time.
-      The elapsed time can be used by the ground callbck to assess the planet
+      The elapsed time can be used by the ground callback to assess the planet
       rotation or the movement of objects.
       @param time elapsed time in seconds since the simulation started.
   */
@@ -150,11 +150,6 @@ public:
   */
   void SetGroundCallback(FGGroundCallback* gc) { GroundCallback.reset(gc); }
 
-  struct Inputs {
-    FGLocation Position;
-  } in;
-
-private:
   /// These define the indices use to select the gravitation models.
   enum eGravType {
     /// Evaluate gravity using Newton's classical formula assuming the Earth is
@@ -165,6 +160,48 @@ private:
     gtWGS84
   };
 
+  /// Get the gravity type.
+  int GetGravityType(void) const { return gravType; }
+
+  /// Set the gravity type.
+  void SetGravityType(int gt);
+
+  /** Transform matrix from the local horizontal frame to earth centered.
+      The local frame is the NED (North-East-Down) frame. Since the Down
+      direction depends on the gravity so is the local frame.
+      The East direction is tangent to the spheroid with a null component along
+      the Z axis.
+      The North direction is obtained from the cross product between East and
+      Down.
+      @param location The location at which the transform matrix must be
+                      evaluated.
+      @return a rotation matrix of the transform from the earth centered frame
+              to the local horizontal frame.
+  */
+  FGMatrix33 GetTl2ec(const FGLocation& location) const;
+
+  /** Transform matrix from the earth centered to local horizontal frame.
+      The local frame is the NED (North-East-Down) frame. Since the Down
+      direction depends on the gravity so is the local frame.
+      The East direction is tangent to the spheroid with a null component along
+      the Z axis.
+      The North direction is obtained from the cross product between East and
+      Down.
+      @param location The location at which the transform matrix must be
+                      evaluated.
+      @return a rotation matrix of the transform from the earth centered frame
+              to the local horizontal frame.
+  */
+  FGMatrix33 GetTec2l(const FGLocation& location) const
+  { return GetTl2ec(location).Transposed(); }
+
+  struct Inputs {
+    FGLocation Position;
+  } in;
+
+  bool Load(Element* el) override;
+
+private:
   // Standard gravity (9.80665 m/s^2) in ft/s^2 which is the gravity at 45 deg.
   // of latitude (see ISA 1976 and Steven & Lewis)
   // It includes the centripetal acceleration.
@@ -172,9 +209,7 @@ private:
 
   FGColumnVector3 vOmegaPlanet;
   FGColumnVector3 vGravAccel;
-  double RadiusReference;
-  double GM;
-  double C2_0; // WGS84 value for the C2,0 coefficient
+  double GM;   // Gravitation parameter
   double J2;   // WGS84 value for J2
   double a;    // WGS84 semimajor axis length in feet 
   double b;    // WGS84 semiminor axis length in feet

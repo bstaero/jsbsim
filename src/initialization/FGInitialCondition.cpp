@@ -48,8 +48,12 @@ INCLUDES
 #include "models/FGInertial.h"
 #include "models/FGAtmosphere.h"
 #include "models/FGAccelerations.h"
+#include "models/FGAuxiliary.h"
 #include "input_output/FGXMLFileRead.h"
 #include "FGTrim.h"
+#include "FGFDMExec.h"
+#include "input_output/string_utilities.h"
+#include "input_output/FGLog.h"
 
 using namespace std;
 
@@ -62,10 +66,10 @@ FGInitialCondition::FGInitialCondition(FGFDMExec *FDMExec) : fdmex(FDMExec)
   InitializeIC();
 
   if(FDMExec) {
-    Atmosphere=fdmex->GetAtmosphere();
     Aircraft=fdmex->GetAircraft();
+    Auxiliary=fdmex->GetAuxiliary();
   } else {
-    cout << "FGInitialCondition: This class requires a pointer to a valid FGFDMExec object" << endl;
+    throw BaseException("FGInitialCondition: This class requires a pointer to a valid FGFDMExec object");
   }
 
   Debug(0);
@@ -122,14 +126,9 @@ void FGInitialCondition::InitializeIC(void)
 {
   alpha = beta = 0.0;
   epa = 0.0;
-  // FIXME: Since FGDefaultGroundCallback assumes the Earth is spherical, so
-  // must FGLocation. However this should be updated according to the assumption
-  // made by the actual callback.
 
-  // double a = fdmex->GetInertial()->GetSemimajor();
-  // double b = fdmex->GetInertial()->GetSemiminor();
-  double a = fdmex->GetInertial()->GetRefRadius();
-  double b = fdmex->GetInertial()->GetRefRadius();
+  double a = fdmex->GetInertial()->GetSemimajor();
+  double b = fdmex->GetInertial()->GetSemiminor();
 
   position.SetEllipse(a, b);
 
@@ -156,10 +155,10 @@ void FGInitialCondition::InitializeIC(void)
 
 void FGInitialCondition::SetVequivalentKtsIC(double ve)
 {
-  double altitudeASL = position.GetGeodAltitude();
+  const auto Atmosphere = fdmex->GetAtmosphere();
+  double altitudeASL = GetAltitudeASLFtIC();
   double rho = Atmosphere->GetDensity(altitudeASL);
-  double rhoSL = Atmosphere->GetDensitySL();
-  SetVtrueFpsIC(ve*ktstofps*sqrt(rhoSL/rho));
+  SetVtrueFpsIC(ve*ktstofps*sqrt(FGAtmosphere::StdDaySLdensity/rho));
   lastSpeedSet = setve;
 }
 
@@ -167,7 +166,8 @@ void FGInitialCondition::SetVequivalentKtsIC(double ve)
 
 void FGInitialCondition::SetMachIC(double mach)
 {
-  double altitudeASL = position.GetGeodAltitude();
+  const auto Atmosphere = fdmex->GetAtmosphere();
+  double altitudeASL = GetAltitudeASLFtIC();
   double soundSpeed = Atmosphere->GetSoundSpeed(altitudeASL);
   SetVtrueFpsIC(mach*soundSpeed);
   lastSpeedSet = setmach;
@@ -177,9 +177,10 @@ void FGInitialCondition::SetMachIC(double mach)
 
 void FGInitialCondition::SetVcalibratedKtsIC(double vcas)
 {
-  double altitudeASL = position.GetGeodAltitude();
+  const auto Atmosphere = fdmex->GetAtmosphere();
+  double altitudeASL = GetAltitudeASLFtIC();
   double pressure = Atmosphere->GetPressure(altitudeASL);
-  double mach = MachFromVcalibrated(fabs(vcas)*ktstofps, pressure);
+  double mach = Auxiliary->MachFromVcalibrated(fabs(vcas)*ktstofps, pressure);
   double soundSpeed = Atmosphere->GetSoundSpeed(altitudeASL);
 
   SetVtrueFpsIC(mach * soundSpeed);
@@ -288,7 +289,8 @@ void FGInitialCondition::SetVtrueFpsIC(double vtrue)
 void FGInitialCondition::SetClimbRateFpsIC(double hdot)
 {
   if (fabs(hdot) > vt) {
-    cerr << "The climb rate cannot be higher than the true speed." << endl;
+    FGLogging log(fdmex->GetLogger(), LogLevel::ERROR);
+    log << "The climb rate cannot be higher than the true speed.\n";
     return;
   }
 
@@ -362,7 +364,8 @@ void FGInitialCondition::calcThetaBeta(double alfa, const FGColumnVector3& _vt_N
   // following error being raised too often, we might need to reconsider this
   // position.
   if (DotProduct(v0, v0) < DotProduct(u, u)) {
-    cerr << "Cannot modify angle 'alpha' from " << alpha << " to " << alfa << endl;
+    FGLogging log(fdmex->GetLogger(), LogLevel::ERROR);
+    log << "Cannot modify angle 'alpha' from " << alpha << " to " << alfa << "\n";
     return;
   }
 
@@ -585,7 +588,7 @@ void FGInitialCondition::SetWindDownKtsIC(double wD)
   const FGMatrix33& Tb2l = orientation.GetTInv();
   FGColumnVector3 _vt_NED = Tb2l * Tw2b * FGColumnVector3(vt, 0., 0.);
 
-  _vt_NED(eW) = vUVW_NED(eW) + wD;
+  _vt_NED(eW) = vUVW_NED(eW) + wD * ktstofps;
   vt = _vt_NED.Magnitude();
 
   calcAeroAngles(_vt_NED);
@@ -653,7 +656,7 @@ void FGInitialCondition::SetTerrainElevationFtIC(double elev)
 
 double FGInitialCondition::GetAltitudeASLFtIC(void) const
 {
-  return position.GetGeodAltitude();
+  return position.GetRadius() - position.GetSeaLevelRadius();
 }
 
 //******************************************************************************
@@ -667,8 +670,11 @@ double FGInitialCondition::GetAltitudeASLFtIC(void) const
 
 double FGInitialCondition::GetTerrainElevationFtIC(void) const
 {
-  FGLocation contact;
   FGColumnVector3 normal, v, w;
+  FGLocation contact;
+  double a = fdmex->GetInertial()->GetSemimajor();
+  double b = fdmex->GetInertial()->GetSemiminor();
+  contact.SetEllipse(a, b);
   fdmex->GetInertial()->GetContactPoint(position, contact, normal, v, w);
   return contact.GetGeodAltitude();
 }
@@ -677,7 +683,68 @@ double FGInitialCondition::GetTerrainElevationFtIC(void) const
 
 void FGInitialCondition::SetAltitudeAGLFtIC(double agl)
 {
-  fdmex->GetInertial()->SetAltitudeAGL(position, agl);
+  const auto Atmosphere = fdmex->GetAtmosphere();
+  double altitudeASL = GetAltitudeASLFtIC();
+  double pressure = Atmosphere->GetPressure(altitudeASL);
+  double soundSpeed = Atmosphere->GetSoundSpeed(altitudeASL);
+  double rho = Atmosphere->GetDensity(altitudeASL);
+
+  double mach0 = vt / soundSpeed;
+  double vc0 = Auxiliary->VcalibratedFromMach(mach0, pressure);
+  double ve0 = vt * sqrt(rho/FGAtmosphere::StdDaySLdensity);
+
+  switch(lastLatitudeSet) {
+  case setgeod:
+    fdmex->GetInertial()->SetAltitudeAGL(position, agl);
+    break;
+  case setgeoc:
+    {
+      double a = fdmex->GetInertial()->GetSemimajor();
+      double b = fdmex->GetInertial()->GetSemiminor();
+      double e2 = 1.0-b*b/(a*a);
+      double tanlat = tan(position.GetLatitude());
+      double n = e2;
+      double prev_n = 1.0;
+      int iter = 0;
+      double longitude = position.GetLongitude();
+      double alt = position.GetGeodAltitude();
+      double h = -2.0*max(a,b);
+      double geodLat;
+      while ((fabs(n-prev_n) > 1E-15 || fabs(h-agl) > 1E-10) && iter < 10) {
+        geodLat = atan(tanlat/(1-n));
+        position.SetPositionGeodetic(longitude, geodLat, alt);
+        h = GetAltitudeAGLFtIC();
+        alt += agl-h;
+        double sinGeodLat = sin(geodLat);
+        double N = a/sqrt(1-e2*sinGeodLat*sinGeodLat);
+        prev_n = n;
+        n = e2*N/(N+alt);
+        iter++;
+      }
+    }
+    break;
+  }
+
+  altitudeASL = GetAltitudeASLFtIC();
+  soundSpeed = Atmosphere->GetSoundSpeed(altitudeASL);
+  rho = Atmosphere->GetDensity(altitudeASL);
+  pressure = Atmosphere->GetPressure(altitudeASL);
+
+  switch(lastSpeedSet) {
+    case setvc:
+      mach0 = Auxiliary->MachFromVcalibrated(vc0, pressure);
+      SetVtrueFpsIC(mach0 * soundSpeed);
+      break;
+    case setmach:
+      SetVtrueFpsIC(mach0 * soundSpeed);
+      break;
+    case setve:
+      SetVtrueFpsIC(ve0 * sqrt(FGAtmosphere::StdDaySLdensity/rho));
+      break;
+    default: // Make the compiler stop complaining about missing enums
+      break;
+  }
+
   lastAltitudeSet = setagl;
 }
 
@@ -688,35 +755,95 @@ void FGInitialCondition::SetAltitudeAGLFtIC(double agl)
 
 void FGInitialCondition::SetAltitudeASLFtIC(double alt)
 {
-  double altitudeASL = position.GetGeodAltitude();
+  const auto Atmosphere = fdmex->GetAtmosphere();
+  double altitudeASL = GetAltitudeASLFtIC();
   double pressure = Atmosphere->GetPressure(altitudeASL);
   double soundSpeed = Atmosphere->GetSoundSpeed(altitudeASL);
   double rho = Atmosphere->GetDensity(altitudeASL);
-  double rhoSL = Atmosphere->GetDensitySL();
 
   double mach0 = vt / soundSpeed;
-  double vc0 = VcalibratedFromMach(mach0, pressure);
-  double ve0 = vt * sqrt(rho/rhoSL);
+  double vc0 = Auxiliary->VcalibratedFromMach(mach0, pressure);
+  double ve0 = vt * sqrt(rho/FGAtmosphere::StdDaySLdensity);
 
-  double geodLatitude = position.GetGeodLatitudeRad();
-  double longitude = position.GetLongitude();
-  altitudeASL=alt;
-  position.SetPositionGeodetic(longitude, geodLatitude, alt);
+  switch(lastLatitudeSet) {
+  case setgeod:
+    {
+      // Given an altitude above the mean sea level (or a position radius which
+      // is the same) and a geodetic latitude, compute the geodetic altitude.
+      double a = fdmex->GetInertial()->GetSemimajor();
+      double b = fdmex->GetInertial()->GetSemiminor();
+      double e2 = 1.0-b*b/(a*a);
+      double geodLatitude = position.GetGeodLatitudeRad();
+      double cosGeodLat = cos(geodLatitude);
+      double sinGeodLat = sin(geodLatitude);
+      double N = a/sqrt(1-e2*sinGeodLat*sinGeodLat);
+      double geodAlt = 0.0;
+      double n = e2;
+      double prev_n = 1.0;
+      int iter = 0;
+      // Use tan or cotan to solve the geodetic altitude to avoid floating point
+      // exceptions.
+      if (cosGeodLat > fabs(sinGeodLat)) { // tan() can safely be used.
+        double tanGeodLat = sinGeodLat/cosGeodLat;
+        double x0 = N*e2*cosGeodLat;
+        double x = 0.0;
+        while (fabs(n-prev_n) > 1E-15 && iter < 10) {
+          double tanLat = (1-n)*tanGeodLat; // See Stevens & Lewis 1.6-14
+          double cos2Lat = 1./(1.+tanLat*tanLat);
+          double slr = b/sqrt(1.-e2*cos2Lat);
+          double R = slr + alt;
+          x = R*sqrt(cos2Lat); // OK, cos(latitude) is always positive.
+          prev_n = n;
+          n = x0/x;
+          iter++;
+        }
+        geodAlt = x/cosGeodLat-N;
+      }
+      else { // better use cotan (i.e. 1./tan())
+        double cotanGeodLat = cosGeodLat/sinGeodLat;
+        double z0 = N*e2*sinGeodLat;
+        double z = 0.0;
+        while (fabs(n-prev_n) > 1E-15 && iter < 10) {
+          double cotanLat = cotanGeodLat/(1-n);
+          double sin2Lat = 1./(1.+cotanLat*cotanLat);
+          double cos2Lat = 1.-sin2Lat;
+          double slr = b/sqrt(1.-e2*cos2Lat);
+          double R = slr + alt;
+          z = R*sign(cotanLat)*sqrt(sin2Lat);
+          prev_n = n;
+          n = z0/(z0+z);
+          iter++;
+        }
+        geodAlt = z/sinGeodLat-N*(1-e2);
+      }
 
+      double longitude = position.GetLongitude();
+      position.SetPositionGeodetic(longitude, geodLatitude, geodAlt);
+    }
+    break;
+  case setgeoc:
+    {
+      double slr = position.GetSeaLevelRadius();
+      position.SetRadius(slr+alt);
+    }
+    break;
+  }
+
+  altitudeASL = position.GetGeodAltitude();
   soundSpeed = Atmosphere->GetSoundSpeed(altitudeASL);
   rho = Atmosphere->GetDensity(altitudeASL);
   pressure = Atmosphere->GetPressure(altitudeASL);
 
   switch(lastSpeedSet) {
     case setvc:
-      mach0 = MachFromVcalibrated(vc0, pressure);
+      mach0 = Auxiliary->MachFromVcalibrated(vc0, pressure);
       SetVtrueFpsIC(mach0 * soundSpeed);
       break;
     case setmach:
       SetVtrueFpsIC(mach0 * soundSpeed);
       break;
     case setve:
-      SetVtrueFpsIC(ve0 * sqrt(rhoSL/rho));
+      SetVtrueFpsIC(ve0 * sqrt(FGAtmosphere::StdDaySLdensity/rho));
       break;
     default: // Make the compiler stop complaining about missing enums
       break;
@@ -729,11 +856,26 @@ void FGInitialCondition::SetAltitudeASLFtIC(double alt)
 
 void FGInitialCondition::SetGeodLatitudeRadIC(double geodLatitude)
 {
-  double h = position.GetGeodAltitude();
   double lon = position.GetLongitude();
-
-  position.SetPositionGeodetic(lon, geodLatitude, h);
   lastLatitudeSet = setgeod;
+
+  switch (lastAltitudeSet)
+  {
+  case setagl:
+    {
+      double agl = GetAltitudeAGLFtIC();
+      position.SetPositionGeodetic(lon, geodLatitude, 0.);
+      fdmex->GetInertial()->SetAltitudeAGL(position, agl);
+    }
+    break;
+  case setasl:
+    {
+      double asl = GetAltitudeASLFtIC();
+      position.SetPositionGeodetic(lon, geodLatitude, 0.);
+      SetAltitudeASLFtIC(asl);
+    }
+    break;
+  }
 }
 
 //******************************************************************************
@@ -751,7 +893,9 @@ void FGInitialCondition::SetLatitudeRadIC(double lat)
     SetAltitudeAGLFtIC(altitude);
     break;
   default:
+    altitude = GetAltitudeASLFtIC();
     position.SetLatitude(lat);
+    SetAltitudeASLFtIC(altitude);
     break;
   }
 }
@@ -782,24 +926,21 @@ double FGInitialCondition::GetWindDirDegIC(void) const
   FGColumnVector3 _vt_NED = Tb2l * Tw2b * FGColumnVector3(vt, 0., 0.);
   FGColumnVector3 _vWIND_NED = _vt_NED - vUVW_NED;
 
-  return _vWIND_NED(eV) == 0.0 ? 0.0
-                               : atan2(_vWIND_NED(eV), _vWIND_NED(eU))*radtodeg;
+  return _vWIND_NED.Magnitude(eU, eV) == 0.0 ? 0.0
+                              : atan2(_vWIND_NED(eV), _vWIND_NED(eU))*radtodeg;
 }
 
 //******************************************************************************
 
-double FGInitialCondition::GetNEDWindFpsIC(int idx) const
-{
+FGColumnVector3 FGInitialCondition::GetWindNEDFpsIC(void) const {
   const FGMatrix33& Tb2l = orientation.GetTInv();
   FGColumnVector3 _vt_NED = Tb2l * Tw2b * FGColumnVector3(vt, 0., 0.);
-  FGColumnVector3 _vWIND_NED = _vt_NED - vUVW_NED;
-
-  return _vWIND_NED(idx);
+  return _vt_NED - vUVW_NED;
 }
 
 //******************************************************************************
 
-double FGInitialCondition::GetWindFpsIC(void) const
+double FGInitialCondition::GetWindMagFpsIC(void) const
 {
   const FGMatrix33& Tb2l = orientation.GetTInv();
   FGColumnVector3 _vt_NED = Tb2l * Tw2b * FGColumnVector3(vt, 0., 0.);
@@ -824,29 +965,31 @@ double FGInitialCondition::GetBodyWindFpsIC(int idx) const
 
 double FGInitialCondition::GetVcalibratedKtsIC(void) const
 {
-  double altitudeASL = position.GetGeodAltitude();
+  const auto Atmosphere = fdmex->GetAtmosphere();
+  double altitudeASL = GetAltitudeASLFtIC();
   double pressure = Atmosphere->GetPressure(altitudeASL);
   double soundSpeed = Atmosphere->GetSoundSpeed(altitudeASL);
   double mach = vt / soundSpeed;
 
-  return fpstokts * VcalibratedFromMach(mach, pressure);
+  return fpstokts * Auxiliary->VcalibratedFromMach(mach, pressure);
 }
 
 //******************************************************************************
 
 double FGInitialCondition::GetVequivalentKtsIC(void) const
 {
-  double altitudeASL = position.GetGeodAltitude();
+  const auto Atmosphere = fdmex->GetAtmosphere();
+  double altitudeASL = GetAltitudeASLFtIC();
   double rho = Atmosphere->GetDensity(altitudeASL);
-  double rhoSL = Atmosphere->GetDensitySL();
-  return fpstokts * vt * sqrt(rho/rhoSL);
+  return fpstokts * vt * sqrt(rho/FGAtmosphere::StdDaySLdensity);
 }
 
 //******************************************************************************
 
 double FGInitialCondition::GetMachIC(void) const
 {
-  double altitudeASL = position.GetGeodAltitude();
+  const auto Atmosphere = fdmex->GetAtmosphere();
+  double altitudeASL = GetAltitudeASLFtIC();
   double soundSpeed = Atmosphere->GetSoundSpeed(altitudeASL);
   return vt / soundSpeed;
 }
@@ -863,10 +1006,10 @@ double FGInitialCondition::GetBodyVelFpsIC(int idx) const
 
 //******************************************************************************
 
-bool FGInitialCondition::Load(const SGPath& rstfile, bool useStoredPath)
+bool FGInitialCondition::Load(const SGPath& rstfile, bool useAircraftPath)
 {
   SGPath init_file_name;
-  if(useStoredPath && rstfile.isRelative()) {
+  if(useAircraftPath && rstfile.isRelative()) {
     init_file_name = fdmex->GetFullAircraftPath()/rstfile.utf8Str();
   } else {
     init_file_name = rstfile;
@@ -877,29 +1020,34 @@ bool FGInitialCondition::Load(const SGPath& rstfile, bool useStoredPath)
 
   // Make sure that the document is valid
   if (!document) {
-    cerr << "File: " << init_file_name << " could not be read." << endl;
-    exit(-1);
+    LogException err(fdmex->GetLogger());
+    err << "File: " << init_file_name << " could not be read.\n";
+    throw err;
   }
 
-  if (document->GetName() != string("initialize")) {
-    cerr << "File: " << init_file_name << " is not a reset file." << endl;
-    exit(-1);
+  if (document->GetName() != "initialize") {
+    LogException err(fdmex->GetLogger());
+    err << "File: " << init_file_name << " is not a reset file.\n";
+    throw err;
   }
 
-  double version = HUGE_VAL;
   bool result = false;
 
-  if (document->HasAttribute("version"))
-    version = document->GetAttributeValueAsNumber("version");
+  // If doc has an version, check it. Otherwise fall back to legacy.
+  if (document->HasAttribute("version")) {
+    double version = document->GetAttributeValueAsNumber("version");
 
-  if (version == HUGE_VAL) {
-    result = Load_v1(document); // Default to the old version
-  } else if (version >= 3.0) {
-    cerr << "Only initialization file formats 1 and 2 are currently supported" << endl;
-    exit (-1);
-  } else if (version >= 2.0) {
-    result = Load_v2(document);
-  } else if (version >= 1.0) {
+    if (version >= 3.0) {
+      XMLLogException err(fdmex->GetLogger(), document);
+      err << "Only initialization file formats 1 and 2 are currently supported\n";
+      throw err;
+    } else if (version >= 2.0) {
+      result = Load_v2(document);
+    } else if (version >= 1.0) {
+      result = Load_v1(document);
+    }
+
+  } else {
     result = Load_v1(document);
   }
 
@@ -927,23 +1075,26 @@ bool FGInitialCondition::LoadLatitude(Element* position_el)
       string unit_type = latitude_el->GetAttributeValue("unit");
       if (unit_type.empty()) unit_type="RAD";
 
-      cerr << latitude_el->ReadFrom() << "The latitude value "
-           << latitude_el->GetDataAsNumber() << " " << unit_type
-           << " is outside the range [";
+      FGLogging log(fdmex->GetLogger(), LogLevel::ERROR);
+      log << latitude_el->ReadFrom() << "The latitude value "
+          << latitude_el->GetDataAsNumber() << " " << unit_type
+          << " is outside the range [";
       if (unit_type == "DEG")
-        cerr << "-90 DEG ; +90 DEG]" << endl;
+        log << "-90 DEG ; +90 DEG]" << endl;
       else
-        cerr << "-PI/2 RAD; +PI/2 RAD]" << endl;
+        log << "-PI/2 RAD; +PI/2 RAD]" << endl;
 
       return false;
     }
 
     string lat_type = latitude_el->GetAttributeValue("type");
 
-    if (lat_type == "geod" || lat_type == "geodetic")
+    if (lat_type == "geod" || lat_type == "geodetic") {
       SetGeodLatitudeRadIC(latitude);
+      lastLatitudeSet = setgeod;
+    }
     else {
-      position.SetLatitude(latitude);
+      SetLatitudeRadIC(latitude);
       lastLatitudeSet = setgeoc;
     }
   }
@@ -1044,15 +1195,7 @@ bool FGInitialCondition::Load_v1(Element* document)
   if (document->FindElement("trim"))
     SetTrimRequest(document->FindElementValue("trim"));
 
-  // Refer to Stevens and Lewis, 1.5-14a, pg. 49.
-  // This is the rotation rate of the "Local" frame, expressed in the local frame.
-  const FGMatrix33& Tl2b = orientation.GetT();
-  double radInv = 1.0 / position.GetRadius();
-  FGColumnVector3 vOmegaLocal = {radInv*vUVW_NED(eEast),
-                                 -radInv*vUVW_NED(eNorth),
-                                 -radInv*vUVW_NED(eEast)*position.GetTanLatitude()};
-
-  vPQR_body = Tl2b * vOmegaLocal;
+  vPQR_body.InitMatrix();
 
   return result;
 }
@@ -1101,21 +1244,18 @@ bool FGInitialCondition::Load_v2(Element* document)
       position = Ti2ec * position_el->FindElementTripletConvertTo("FT");
     } else if (frame == "ecef") {
       if (!position_el->FindElement("x") && !position_el->FindElement("y") && !position_el->FindElement("z")) {
-        double longitude = 0.0;
         if (position_el->FindElement("longitude")) {
-          longitude = position_el->FindElementValueAsNumberConvertTo("longitude", "RAD");
-          position.SetLongitude(longitude);
+          SetLongitudeRadIC(position_el->FindElementValueAsNumberConvertTo("longitude", "RAD"));
         }
         if (position_el->FindElement("radius")) {
           position.SetRadius(position_el->FindElementValueAsNumberConvertTo("radius", "FT"));
         } else if (position_el->FindElement("altitudeAGL")) {
-          fdmex->GetInertial()->SetAltitudeAGL(position,
-                                               position_el->FindElementValueAsNumberConvertTo("altitudeAGL", "FT"));
+          SetAltitudeAGLFtIC(position_el->FindElementValueAsNumberConvertTo("altitudeAGL", "FT"));
         } else if (position_el->FindElement("altitudeMSL")) {
-          position.SetPositionGeodetic(longitude, 0.0,
-                                       position_el->FindElementValueAsNumberConvertTo("altitudeMSL", "FT"));
+          SetAltitudeASLFtIC(position_el->FindElementValueAsNumberConvertTo("altitudeMSL", "FT"));
         } else {
-          cerr << endl << "  No altitude or radius initial condition is given." << endl;
+          FGXMLLogging log(fdmex->GetLogger(), position_el, LogLevel::ERROR);
+          log << "  No altitude or radius initial condition is given.\n";
           result = false;
         }
 
@@ -1126,11 +1266,13 @@ bool FGInitialCondition::Load_v2(Element* document)
         position = position_el->FindElementTripletConvertTo("FT");
       }
     } else {
-      cerr << endl << "  Neither ECI nor ECEF frame is specified for initial position." << endl;
+      FGXMLLogging log(fdmex->GetLogger(), position_el, LogLevel::ERROR);
+      log << "  Neither ECI nor ECEF frame is specified for initial position.\n";
       result = false;
     }
   } else {
-    cerr << endl << "  Initial position not specified in this initialization file." << endl;
+    FGXMLLogging log(fdmex->GetLogger(), document, LogLevel::ERROR);
+    log << "  Initial position not specified in this initialization file.\n";
     result = false;
   }
 
@@ -1205,11 +1347,10 @@ bool FGInitialCondition::Load_v2(Element* document)
       orientation = FGQuaternion(vOrient);
 
     } else {
-
-      cerr << endl << fgred << "  Orientation frame type: \"" << frame
-           << "\" is not supported!" << reset << endl << endl;
+      FGXMLLogging log(fdmex->GetLogger(), orientation_el, LogLevel::ERROR);
+      log << "\n" << LogFormat::RED << "  Orientation frame type: \"" << frame
+          << "\" is not supported!\n\n" << LogFormat::RESET;
       result = false;
-
     }
   }
 
@@ -1245,11 +1386,10 @@ bool FGInitialCondition::Load_v2(Element* document)
       vUVW_NED = Tb2l * vInitVelocity;
       lastSpeedSet = setuvw;
     } else {
-
-      cerr << endl << fgred << "  Velocity frame type: \"" << frame
-           << "\" is not supported!" << reset << endl << endl;
+      FGXMLLogging log(fdmex->GetLogger(), velocity_el, LogLevel::ERROR);
+      log << "\n" << LogFormat::RED << "  Velocity frame type: \"" << frame
+          << "\" is not supported!\n\n" << LogFormat::RESET;
       result = false;
-
     }
 
   } else {
@@ -1269,19 +1409,12 @@ bool FGInitialCondition::Load_v2(Element* document)
   // - Body
 
   Element* attrate_el = document->FindElement("attitude_rate");
-  const FGMatrix33& Tl2b = orientation.GetT();
-
-  // Refer to Stevens and Lewis, 1.5-14a, pg. 49.
-  // This is the rotation rate of the "Local" frame, expressed in the local frame.
-  double radInv = 1.0 / position.GetRadius();
-  FGColumnVector3 vOmegaLocal = { radInv*vUVW_NED(eEast),
-                                  -radInv*vUVW_NED(eNorth),
-                                  -radInv*vUVW_NED(eEast)*position.GetTanLatitude()};
 
   if (attrate_el) {
 
     string frame = attrate_el->GetAttributeValue("frame");
     frame = to_lower(frame);
+    const FGMatrix33& Tl2b = orientation.GetT();
     FGColumnVector3 vAttRate = attrate_el->FindElementTripletConvertTo("RAD/SEC");
 
     if (frame == "eci") {
@@ -1290,21 +1423,27 @@ bool FGInitialCondition::Load_v2(Element* document)
     } else if (frame == "ecef") {
       vPQR_body = Tl2b * position.GetTec2l() * vAttRate;
     } else if (frame == "local") {
+      // Refer to Stevens and Lewis, 1.5-14a, pg. 49.
+      // This is the rotation rate of the "Local" frame, expressed in the local frame.
+      double radInv = 1.0 / position.GetRadius();
+      FGColumnVector3 vOmegaLocal = {radInv*vUVW_NED(eEast),
+                                    -radInv*vUVW_NED(eNorth),
+                                    -radInv*vUVW_NED(eEast)*tan(position.GetLatitude())};
       vPQR_body = Tl2b * (vAttRate + vOmegaLocal);
     } else if (frame == "body") {
       vPQR_body = vAttRate;
     } else if (!frame.empty()) { // misspelling of frame
-
-      cerr << endl << fgred << "  Attitude rate frame type: \"" << frame
-           << "\" is not supported!" << reset << endl << endl;
+      FGXMLLogging log(fdmex->GetLogger(), attrate_el, LogLevel::ERROR);
+      log << endl << LogFormat::RED << "  Attitude rate frame type: \"" << frame
+          << "\" is not supported!\n\n" << LogFormat::RESET;
       result = false;
 
     } else if (frame.empty()) {
-      vPQR_body = Tl2b * vOmegaLocal;
+      vPQR_body.InitMatrix();
     }
 
   } else { // Body frame attitude rate assumed 0 relative to local.
-      vPQR_body = Tl2b * vOmegaLocal;
+      vPQR_body.InitMatrix();
   }
 
   return result;
@@ -1316,80 +1455,61 @@ void FGInitialCondition::bind(FGPropertyManager* PropertyManager)
 {
   PropertyManager->Tie("ic/vc-kts", this,
                        &FGInitialCondition::GetVcalibratedKtsIC,
-                       &FGInitialCondition::SetVcalibratedKtsIC,
-                       true);
+                       &FGInitialCondition::SetVcalibratedKtsIC);
   PropertyManager->Tie("ic/ve-kts", this,
                        &FGInitialCondition::GetVequivalentKtsIC,
-                       &FGInitialCondition::SetVequivalentKtsIC,
-                       true);
+                       &FGInitialCondition::SetVequivalentKtsIC);
   PropertyManager->Tie("ic/vg-kts", this,
                        &FGInitialCondition::GetVgroundKtsIC,
-                       &FGInitialCondition::SetVgroundKtsIC,
-                       true);
+                       &FGInitialCondition::SetVgroundKtsIC);
   PropertyManager->Tie("ic/vt-kts", this,
                        &FGInitialCondition::GetVtrueKtsIC,
-                       &FGInitialCondition::SetVtrueKtsIC,
-                       true);
+                       &FGInitialCondition::SetVtrueKtsIC);
   PropertyManager->Tie("ic/mach", this,
                        &FGInitialCondition::GetMachIC,
-                       &FGInitialCondition::SetMachIC,
-                       true);
+                       &FGInitialCondition::SetMachIC);
   PropertyManager->Tie("ic/roc-fpm", this,
                        &FGInitialCondition::GetClimbRateFpmIC,
-                       &FGInitialCondition::SetClimbRateFpmIC,
-                       true);
+                       &FGInitialCondition::SetClimbRateFpmIC);
   PropertyManager->Tie("ic/gamma-deg", this,
                        &FGInitialCondition::GetFlightPathAngleDegIC,
-                       &FGInitialCondition::SetFlightPathAngleDegIC,
-                       true);
+                       &FGInitialCondition::SetFlightPathAngleDegIC);
   PropertyManager->Tie("ic/alpha-deg", this,
                        &FGInitialCondition::GetAlphaDegIC,
-                       &FGInitialCondition::SetAlphaDegIC,
-                       true);
+                       &FGInitialCondition::SetAlphaDegIC);
   PropertyManager->Tie("ic/beta-deg", this,
                        &FGInitialCondition::GetBetaDegIC,
-                       &FGInitialCondition::SetBetaDegIC,
-                       true);
+                       &FGInitialCondition::SetBetaDegIC);
   PropertyManager->Tie("ic/theta-deg", this,
                        &FGInitialCondition::GetThetaDegIC,
-                       &FGInitialCondition::SetThetaDegIC,
-                       true);
+                       &FGInitialCondition::SetThetaDegIC);
   PropertyManager->Tie("ic/phi-deg", this,
                        &FGInitialCondition::GetPhiDegIC,
-                       &FGInitialCondition::SetPhiDegIC,
-                       true);
+                       &FGInitialCondition::SetPhiDegIC);
   PropertyManager->Tie("ic/psi-true-deg", this,
                        &FGInitialCondition::GetPsiDegIC,
-                       &FGInitialCondition::SetPsiDegIC,
-                       true);
+                       &FGInitialCondition::SetPsiDegIC);
   PropertyManager->Tie("ic/lat-gc-deg", this,
                        &FGInitialCondition::GetLatitudeDegIC,
-                       &FGInitialCondition::SetLatitudeDegIC,
-                       true);
+                       &FGInitialCondition::SetLatitudeDegIC);
   PropertyManager->Tie("ic/long-gc-deg", this,
                        &FGInitialCondition::GetLongitudeDegIC,
-                       &FGInitialCondition::SetLongitudeDegIC,
-                       true);
+                       &FGInitialCondition::SetLongitudeDegIC);
   PropertyManager->Tie("ic/h-sl-ft", this,
                        &FGInitialCondition::GetAltitudeASLFtIC,
-                       &FGInitialCondition::SetAltitudeASLFtIC,
-                       true);
+                       &FGInitialCondition::SetAltitudeASLFtIC);
   PropertyManager->Tie("ic/h-agl-ft", this,
                        &FGInitialCondition::GetAltitudeAGLFtIC,
-                       &FGInitialCondition::SetAltitudeAGLFtIC,
-                       true);
+                       &FGInitialCondition::SetAltitudeAGLFtIC);
   PropertyManager->Tie("ic/terrain-elevation-ft", this,
                        &FGInitialCondition::GetTerrainElevationFtIC,
-                       &FGInitialCondition::SetTerrainElevationFtIC,
-                       true);
+                       &FGInitialCondition::SetTerrainElevationFtIC);
   PropertyManager->Tie("ic/vg-fps", this,
                        &FGInitialCondition::GetVgroundFpsIC,
-                       &FGInitialCondition::SetVgroundFpsIC,
-                       true);
+                       &FGInitialCondition::SetVgroundFpsIC);
   PropertyManager->Tie("ic/vt-fps", this,
                        &FGInitialCondition::GetVtrueFpsIC,
-                       &FGInitialCondition::SetVtrueFpsIC,
-                       true);
+                       &FGInitialCondition::SetVtrueFpsIC);
   PropertyManager->Tie("ic/vw-bx-fps", this,
                        &FGInitialCondition::GetWindUFpsIC);
   PropertyManager->Tie("ic/vw-by-fps", this,
@@ -1403,99 +1523,78 @@ void FGInitialCondition::bind(FGPropertyManager* PropertyManager)
   PropertyManager->Tie("ic/vw-down-fps", this,
                        &FGInitialCondition::GetWindDFpsIC);
   PropertyManager->Tie("ic/vw-mag-fps", this,
-                       &FGInitialCondition::GetWindFpsIC);
+                       &FGInitialCondition::GetWindMagFpsIC,
+                       &FGInitialCondition::SetWindMagFpsIC);
   PropertyManager->Tie("ic/vw-dir-deg", this,
                        &FGInitialCondition::GetWindDirDegIC,
-                       &FGInitialCondition::SetWindDirDegIC,
-                       true);
+                       &FGInitialCondition::SetWindDirDegIC);
 
   PropertyManager->Tie("ic/roc-fps", this,
                        &FGInitialCondition::GetClimbRateFpsIC,
-                       &FGInitialCondition::SetClimbRateFpsIC,
-                       true);
+                       &FGInitialCondition::SetClimbRateFpsIC);
   PropertyManager->Tie("ic/u-fps", this,
                        &FGInitialCondition::GetUBodyFpsIC,
-                       &FGInitialCondition::SetUBodyFpsIC,
-                       true);
+                       &FGInitialCondition::SetUBodyFpsIC);
   PropertyManager->Tie("ic/v-fps", this,
                        &FGInitialCondition::GetVBodyFpsIC,
-                       &FGInitialCondition::SetVBodyFpsIC,
-                       true);
+                       &FGInitialCondition::SetVBodyFpsIC);
   PropertyManager->Tie("ic/w-fps", this,
                        &FGInitialCondition::GetWBodyFpsIC,
-                       &FGInitialCondition::SetWBodyFpsIC,
-                       true);
+                       &FGInitialCondition::SetWBodyFpsIC);
   PropertyManager->Tie("ic/vn-fps", this,
                        &FGInitialCondition::GetVNorthFpsIC,
-                       &FGInitialCondition::SetVNorthFpsIC,
-                       true);
+                       &FGInitialCondition::SetVNorthFpsIC);
   PropertyManager->Tie("ic/ve-fps", this,
                        &FGInitialCondition::GetVEastFpsIC,
-                       &FGInitialCondition::SetVEastFpsIC,
-                       true);
+                       &FGInitialCondition::SetVEastFpsIC);
   PropertyManager->Tie("ic/vd-fps", this,
                        &FGInitialCondition::GetVDownFpsIC,
-                       &FGInitialCondition::SetVDownFpsIC,
-                       true);
+                       &FGInitialCondition::SetVDownFpsIC);
   PropertyManager->Tie("ic/gamma-rad", this,
                        &FGInitialCondition::GetFlightPathAngleRadIC,
-                       &FGInitialCondition::SetFlightPathAngleRadIC,
-                       true);
+                       &FGInitialCondition::SetFlightPathAngleRadIC);
   PropertyManager->Tie("ic/alpha-rad", this,
                        &FGInitialCondition::GetAlphaRadIC,
-                       &FGInitialCondition::SetAlphaRadIC,
-                       true);
+                       &FGInitialCondition::SetAlphaRadIC);
   PropertyManager->Tie("ic/theta-rad", this,
                        &FGInitialCondition::GetThetaRadIC,
-                       &FGInitialCondition::SetThetaRadIC,
-                       true);
+                       &FGInitialCondition::SetThetaRadIC);
   PropertyManager->Tie("ic/beta-rad", this,
                        &FGInitialCondition::GetBetaRadIC,
-                       &FGInitialCondition::SetBetaRadIC,
-                       true);
+                       &FGInitialCondition::SetBetaRadIC);
   PropertyManager->Tie("ic/phi-rad", this,
                        &FGInitialCondition::GetPhiRadIC,
-                       &FGInitialCondition::SetPhiRadIC,
-                       true);
+                       &FGInitialCondition::SetPhiRadIC);
   PropertyManager->Tie("ic/psi-true-rad", this,
                        &FGInitialCondition::GetPsiRadIC,
-                       &FGInitialCondition::SetPsiRadIC,
-                       true);
+                       &FGInitialCondition::SetPsiRadIC);
   PropertyManager->Tie("ic/lat-gc-rad", this,
                        &FGInitialCondition::GetLatitudeRadIC,
-                       &FGInitialCondition::SetLatitudeRadIC,
-                       true);
+                       &FGInitialCondition::SetLatitudeRadIC);
   PropertyManager->Tie("ic/long-gc-rad", this,
                        &FGInitialCondition::GetLongitudeRadIC,
-                       &FGInitialCondition::SetLongitudeRadIC,
-                       true);
+                       &FGInitialCondition::SetLongitudeRadIC);
   PropertyManager->Tie("ic/p-rad_sec", this,
                        &FGInitialCondition::GetPRadpsIC,
-                       &FGInitialCondition::SetPRadpsIC,
-                       true);
+                       &FGInitialCondition::SetPRadpsIC);
   PropertyManager->Tie("ic/q-rad_sec", this,
                        &FGInitialCondition::GetQRadpsIC,
-                       &FGInitialCondition::SetQRadpsIC,
-                       true);
+                       &FGInitialCondition::SetQRadpsIC);
   PropertyManager->Tie("ic/r-rad_sec", this,
                        &FGInitialCondition::GetRRadpsIC,
-                       &FGInitialCondition::SetRRadpsIC,
-                       true);
+                       &FGInitialCondition::SetRRadpsIC);
   PropertyManager->Tie("ic/lat-geod-rad", this,
                        &FGInitialCondition::GetGeodLatitudeRadIC,
-                       &FGInitialCondition::SetGeodLatitudeRadIC,
-                       true);
+                       &FGInitialCondition::SetGeodLatitudeRadIC);
   PropertyManager->Tie("ic/lat-geod-deg", this,
                        &FGInitialCondition::GetGeodLatitudeDegIC,
-                       &FGInitialCondition::SetGeodLatitudeDegIC,
-                       true);
+                       &FGInitialCondition::SetGeodLatitudeDegIC);
   PropertyManager->Tie("ic/geod-alt-ft", &position,
                        &FGLocation::GetGeodAltitude);
 
   PropertyManager->Tie("ic/targetNlf", this,
                        &FGInitialCondition::GetTargetNlfIC,
-                       &FGInitialCondition::SetTargetNlfIC,
-                       true);
+                       &FGInitialCondition::SetTargetNlfIC);
 }
 
 //%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -1524,8 +1623,9 @@ void FGInitialCondition::Debug(int from)
   if (debug_lvl & 1) { // Standard console startup message output
   }
   if (debug_lvl & 2 ) { // Instantiation/Destruction notification
-    if (from == 0) cout << "Instantiated: FGInitialCondition" << endl;
-    if (from == 1) cout << "Destroyed:    FGInitialCondition" << endl;
+    FGLogging log(fdmex->GetLogger(), LogLevel::DEBUG);
+    if (from == 0) log << "Instantiated: FGInitialCondition\n";
+    if (from == 1) log << "Destroyed:    FGInitialCondition\n";
   }
   if (debug_lvl & 4 ) { // Run() method entry print for FGModel-derived objects
   }

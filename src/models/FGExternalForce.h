@@ -40,7 +40,7 @@ INCLUDES
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%*/
 
 #include "models/propulsion/FGForce.h"
-#include "simgear/props/propertyObject.hxx"
+#include "input_output/FGPropertyManager.h"
 
 /*%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 FORWARD DECLARATIONS
@@ -50,7 +50,45 @@ namespace JSBSim {
 
 class FGParameter;
 class Element;
-class FGPropertyManager;
+
+/*%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+CLASS DECLARATION
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%*/
+
+class FGPropertyVector3
+{
+public:
+  FGPropertyVector3(void) {}
+  FGPropertyVector3(FGPropertyManager* pm, const std::string& baseName,
+                    const std::string& xcmp, const std::string& ycmp,
+                    const std::string& zcmp);
+
+  FGPropertyVector3& operator=(const FGColumnVector3& v) {
+    data[1]->setDoubleValue(v(2));
+    data[0]->setDoubleValue(v(1));
+    data[2]->setDoubleValue(v(3));
+
+    return *this;
+  }
+
+  operator FGColumnVector3() const {
+    return FGColumnVector3(data[0]->getDoubleValue(), data[1]->getDoubleValue(),
+                           data[2]->getDoubleValue());
+  }
+
+  FGColumnVector3 operator*(double a) const {
+    return FGColumnVector3(a * data[0]->getDoubleValue(),
+                           a * data[1]->getDoubleValue(),
+                           a * data[2]->getDoubleValue());
+  }
+
+private:
+  SGPropertyNode_ptr data[3];
+};
+
+inline FGColumnVector3 operator*(double a, const FGPropertyVector3& v) {
+  return v*a;
+}
 
 /*%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 CLASS DOCUMENTATION
@@ -73,6 +111,7 @@ CLASS DOCUMENTATION
            completes the right handed system. This is modified from a normal
            wind frame definition, which is rotated about the Y axis 180 degrees
            from this WIND frame.
+    - INERTIAL frame refers to the ECI frame.
 
     Much of the substance of this class is located in the FGForce base class,
     from which this class is derived.
@@ -84,7 +123,7 @@ CLASS DOCUMENTATION
 
       [<function> ... </function>]
 
-      <location unit="{IN | M}"> 
+      <location unit="{IN | M}">
         <x> {number} </x>
         <y> {number} </y>
         <z> {number} </z>
@@ -168,42 +207,6 @@ CLASS DOCUMENTATION
     external_reactions/{moment name}/magnitude-lbsft
     @endcode
 */
-
-/*%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-CLASS DECLARATION
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%*/
-
-class FGPropertyVector3
-{
-public:
-  FGPropertyVector3(void) {}
-  FGPropertyVector3(FGPropertyManager* pm, const std::string& baseName,
-                    const std::string& xcmp, const std::string& ycmp,
-                    const std::string& zcmp);
-
-  FGPropertyVector3& operator=(const FGColumnVector3& v) {
-    data[0] = v(1);
-    data[1] = v(2);
-    data[2] = v(3);
-
-    return *this;
-  }
-
-  operator FGColumnVector3() const {
-    return FGColumnVector3(data[0], data[1], data[2]);
-  }
-
-  FGColumnVector3 operator*(double a) const {
-    return FGColumnVector3(a * data[0], a * data[1], a * data[2]);
-  }
-
-private:
-  SGPropObjDouble data[3];
-};
-
-inline FGColumnVector3 operator*(double a, const FGPropertyVector3& v) {
-  return v*a;
-}
 
 class FGExternalForce : public FGForce
 {

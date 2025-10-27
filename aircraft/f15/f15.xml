@@ -6,7 +6,7 @@
 
     <fileheader>
         <author> Erik Hofman </author>
-        <filecreationdate> 2005-01-01 </filecreationdate>
+        <filecreationdate>2005-01-01</filecreationdate>
         <version> $Revision: 1.31 $ </version>
         <description> McDonnell Douglas F-15 Eagle </description>
       <note>
@@ -48,7 +48,7 @@
         </location>
     </metrics>
 
-    <mass_balance>
+    <mass_balance negated_crossproduct_inertia="true">
         <ixx unit="SLUG*FT2"> 28700 </ixx>
         <iyy unit="SLUG*FT2"> 165100 </iyy>
         <izz unit="SLUG*FT2"> 187900 </izz>
@@ -61,7 +61,7 @@
         </location>
         <pointmass name="Pilot">
             <weight unit="LBS"> 230 </weight>
-            <location name="POINTMASS" unit="IN">
+            <location unit="IN">
                 <x> -398.45 </x>
                 <y> 0 </y>
                 <z> 20 </z>
@@ -208,16 +208,6 @@
     </ground_reactions>
     <propulsion>
         <engine file="F100-PW-229">
-            <location unit="IN">
-                <x> 0 </x>
-                <y> -25.5 </y>
-                <z> 0 </z>
-            </location>
-            <orient unit="DEG">
-                <roll> 0.0 </roll>
-                <pitch> 0 </pitch>
-                <yaw> 0 </yaw>
-            </orient>
             <feed>0</feed>
             <feed>1</feed>
             <thruster file="direct">
@@ -234,16 +224,6 @@
             </thruster>
         </engine>
         <engine file="F100-PW-229">
-            <location unit="IN">
-                <x> 0 </x>
-                <y> 25.5 </y>
-                <z> 0 </z>
-            </location>
-            <orient unit="DEG">
-                <roll> 0.0 </roll>
-                <pitch> 0 </pitch>
-                <yaw> 0 </yaw>
-            </orient>
             <feed>0</feed>
             <feed>1</feed>
             <thruster file="direct">
@@ -305,7 +285,7 @@
             </kinematic>
 
             <aerosurface_scale name="elevator position">
-                <input>fcs/pitch-trim-sum</input>
+                <input>fcs/elevator-pos-norm</input>
                 <gain>0.01745</gain>
                 <domain>
                     <min>-1</min>
@@ -596,7 +576,7 @@
                 <product>
                     <property>aero/qbar-psf</property>
                     <property>metrics/Sw-sqft</property>
-                    <abs><property>fcs/mag-elevator-pos-rad</property></abs>
+                    <property>fcs/mag-elevator-pos-rad</property>
                     <value>0.0438</value>
                 </product>
             </function>

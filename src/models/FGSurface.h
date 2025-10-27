@@ -38,13 +38,14 @@ SENTRY
 INCLUDES
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%*/
 
-#include "FGFDMExec.h"
-
 /*%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 FORWARD DECLARATIONS
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%*/
 
 namespace JSBSim {
+
+class FGFDMExec;
+class FGPropertyManager;
 
 /*%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 CLASS DOCUMENTATION
@@ -61,16 +62,10 @@ CLASS DECLARATION
 class FGSurface
 {
 public:
-
-  enum ContactType {ctBOGEY, ctSTRUCTURE, ctGROUND};
-
   /// Constructor
-  FGSurface(FGFDMExec* fdmex, int number = -1);
+  FGSurface(FGFDMExec* fdmex);
 
-  /// Destructor
-  ~FGSurface();
-
-  void bind(void);
+  void bind(FGPropertyManager* pm);
 
   /// Reset all surface values to a default
   void resetValues(void);
@@ -112,29 +107,17 @@ public:
   bool GetSolid(void) { return isSolid; }
 
   /// Returns the height of the bump at the provided offset
-  float  GetBumpHeight();
-
-  std::string GetSurfaceStrings(std::string delimeter) const;
-  std::string GetSurfaceValues(std::string delimeter) const;
+  double  GetBumpHeight();
 
 protected:
-  ContactType eSurfaceType;
   double staticFFactor, rollingFFactor;
   double maximumForce;
   double bumpiness;
   bool isSolid;
 
-  double staticFCoeff, dynamicFCoeff;
-
 private:
-  int contactNumber;
   double pos[3];
-
-  FGPropertyManager* _PropertyManager;
-
-  static std::string _CreateIndexedPropertyName(const std::string& Property, int index);
 };
-
 }
 //%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 #endif

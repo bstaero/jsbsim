@@ -41,8 +41,8 @@ moments due to the difference between the point of application and the cg.
 
 #include "FGForce.h"
 #include "FGFDMExec.h"
-#include "models/FGMassBalance.h"
 #include "models/FGAuxiliary.h"
+#include "input_output/FGLog.h"
 
 using namespace std;
 
@@ -50,9 +50,8 @@ namespace JSBSim {
 
 //%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-FGForce::FGForce(FGFDMExec *FDMExec) :
-                 fdmex(FDMExec),
-                 ttype(tNone)
+FGForce::FGForce(FGFDMExec *FDMExec)
+  : fdmex(FDMExec), MassBalance(fdmex->GetMassBalance()), ttype(tNone)
 {
   vFn.InitMatrix();
   vMn.InitMatrix();
@@ -87,7 +86,7 @@ const FGColumnVector3& FGForce::GetBodyForces(void)
   // needs to be done like this to convert from structural to body coords.
   // CG and RP values are in inches
 
-  FGColumnVector3 vDXYZ = fdmex->GetMassBalance()->StructuralToBody(vActingXYZn);
+  FGColumnVector3 vDXYZ = MassBalance->StructuralToBody(vActingXYZn);
 
   vM = vMn + vDXYZ*vFb;
 
@@ -103,12 +102,17 @@ const FGMatrix33& FGForce::Transform(void) const
     return fdmex->GetAuxiliary()->GetTw2b();
   case tLocalBody:
     return fdmex->GetPropagate()->GetTl2b();
+  case tInertialBody:
+    return fdmex->GetPropagate()->GetTi2b();
   case tCustom:
   case tNone:
     return mT;
   default:
-    cout << "Unrecognized tranform requested from FGForce::Transform()" << endl;
-    exit(1);
+    {
+      LogException err(fdmex->GetLogger());
+      err << "Unrecognized tranform requested from FGForce::Transform()\n";
+      throw err;
+    }
   }
 }
 
@@ -178,12 +182,12 @@ void FGForce::Debug(int from)
 
   if (debug_lvl & 1) { // Standard console startup message output
     if (from == 0) { // Constructor
-
     }
   }
   if (debug_lvl & 2 ) { // Instantiation/Destruction notification
-    if (from == 0) cout << "Instantiated: FGForce" << endl;
-    if (from == 1) cout << "Destroyed:    FGForce" << endl;
+    FGLogging log(fdmex->GetLogger(), LogLevel::DEBUG);
+    if (from == 0) log << "Instantiated: FGForce\n";
+    if (from == 1) log << "Destroyed:    FGForce\n";
   }
   if (debug_lvl & 4 ) { // Run() method entry print for FGModel-derived objects
   }

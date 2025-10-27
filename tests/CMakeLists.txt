@@ -15,7 +15,9 @@ set(PYTHON_TESTS ResetOutputFiles
                  CheckOutputRate
                  TestAccelerometer
                  CheckDebugLvl
+                 TestTurbulenceRandomSeed
                  TestCosineGust
+                 TestTurbulenceGustStop
                  TestScriptOutput
                  CheckSimTimeReset
                  TestHoldDown
@@ -45,9 +47,16 @@ set(PYTHON_TESTS ResetOutputFiles
                  TestFilter
                  TestFunctions
                  TestDistributor
-                 )
+                 TestMagnetometer
+                 TestLinearization
+                 TestLinearActuator
+                 TestPlanet
+                 TestLighterThanAir
+                 TestUnusableFuel
+                 TestSensorRandomSeed
+                 TestPQRdot)
 
 foreach(test ${PYTHON_TESTS})
   add_test(NAME ${test}
-    COMMAND ${PYTHON_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/${test}.py)
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/${test}.py)
 endforeach()

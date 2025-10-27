@@ -11,7 +11,7 @@
 
     <fileheader>
         <author> Erik Hofman </author>
-        <filecreationdate> 2002-01-01</filecreationdate>
+        <filecreationdate>2002-01-01</filecreationdate>
         <version> $Revision: 1.22 $ </version>
         <description> Fokker 50 commercial turboprop airliner </description>
         <reference refID="None" author="n/a" title="n/a" date="n/a"/>
@@ -180,19 +180,9 @@
 
 
     <propulsion>
-        <engine file="PW125BX">  -->
-            <location unit="IN">
-                <x> 497.072 </x>
-                <y> -190.298 </y>
-                <z> -40 </z>
-            </location>
-            <orient unit="DEG">
-                <roll> 0.0 </roll>
-                <pitch> 0 </pitch>
-                <yaw> 0 </yaw>
-            </orient>
+        <engine file="PW125BX">
             <feed>0</feed>
-            <thruster file="dowty-rotol-aero">   
+            <thruster file="dowty-rotol-aero">
                 <location unit="IN">
                     <x> 497.072 </x>
                     <y> -190.298 </y>
@@ -205,19 +195,9 @@
                 </orient>
             </thruster>
         </engine>
-        <engine file="PW125BX">  
-            <location unit="IN">
-                <x> 497.072 </x>
-                <y> 190.298 </y>
-                <z> -40 </z>
-            </location>
-            <orient unit="DEG">
-                <roll> 0.0 </roll>
-                <pitch> 0 </pitch>
-                <yaw> 0 </yaw>
-            </orient>
+        <engine file="PW125BX">
             <feed>1</feed>
-            <thruster file="dowty-rotol-aero">  
+            <thruster file="dowty-rotol-aero">
                 <location unit="IN">
                     <x> 497.072 </x>
                     <y> 190.298 </y>
@@ -249,7 +229,7 @@
             <capacity unit="LBS"> 4576 </capacity>
             <contents unit="LBS"> 1100 </contents>
         </tank>  <!--
-        <tank type="FUEL">     Tank number 2 
+        <tank type="FUEL">     Tank number 2
             <location unit="IN">
                 <x> 497.072 </x>
                 <y> 0 </y>
@@ -263,8 +243,8 @@
 
     <flight_control name="Fokker50">
 
-      <property value="0" type="float">/systems/fokker50/erp/settingn</property>
-      <property value="0" type="float">/systems/fokker50/erp/settinggi</property>
+      <property value="0">/systems/fokker50/erp/settingn</property>
+      <property value="0">/systems/fokker50/erp/settinggi</property>
 
       <channel name="EEC">
 
@@ -300,7 +280,7 @@
                          <property> /controls/engines/engine/throttle </property>
                      </product>
                  </function>
-               <output>fcs/throttle-cmd-norm[0]</output> 
+               <output>fcs/throttle-cmd-norm[0]</output>
              </fcs_function>
 
              <fcs_function name="fcs/eec-throttle-pos-norm[1]">
@@ -697,7 +677,7 @@
                 <product>
                     <property>aero/qbar-psf</property>
                     <property>metrics/Sw-sqft</property>
-                    <abs><property>fcs/elevator-pos-norm</property></abs>
+                    <property>fcs/mag-elevator-pos-rad</property>
                     <value>0.0400</value>
                 </product>
             </function>
